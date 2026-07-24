@@ -499,7 +499,11 @@ function hitPlayer(world, attacker, target, move, direction) {
   const rage = 1 + clamp(((attacker.damage || 0) - 35) / 115, 0, 1) * 0.1;
   const armorAction = target.action;
   const armorStartup = armorAction ? armorAction.startup ?? armorAction.move.startup : 0;
-  const armored = !!armorAction?.move?.armor && armorAction.frame >= armorStartup && armorAction.frame < armorStartup + armorAction.move.active;
+  const armorThreshold = Number(armorAction?.move?.armorThreshold ?? Infinity);
+  const armored = !!armorAction?.move?.armor
+    && armorAction.frame >= armorStartup
+    && armorAction.frame < armorStartup + armorAction.move.active
+    && damage <= armorThreshold;
   if (!armored) {
     if (target.grabbedBy != null) {
       const holder = world.players.find(player => player.i === target.grabbedBy);

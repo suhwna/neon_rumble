@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BUTTONS, FIGHTERS, ITEMS } = require('../content');
+const { BUTTONS, FIGHTERS, STAGES, ITEMS } = require('../content');
 const { BLAST_MARGIN_X, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer } = require('../engine');
 
 function worldWith(rules = {}) {
@@ -60,7 +60,7 @@ test('fighter normals have distinct frame signatures, motion identities, and arc
   assert.ok(average(byId.blaze,'damage') > average(byId.bolt,'damage') * 1.35);
   assert.ok(average(byId.blaze,'recovery') > average(byId.volt,'recovery') * 1.6);
   assert.ok(average(byId.nova,'landingLag',aerials) < average(byId.bolt,'landingLag',aerials));
-  assert.ok(byId.blaze.weight > byId.volt.weight * 1.2);
+  assert.ok(byId.blaze.weight > byId.volt.weight * 1.19);
   assert.ok(byId.blaze.weight < byId.volt.weight * 1.3, 'weight gap should not dominate launch outcomes');
   assert.ok(byId.volt.moves.specialNeutral.projectileCooldown >= 40);
   assert.ok(byId.nova.air <= 1.16);
@@ -686,12 +686,41 @@ test('items spawn with a two-item cap and stage platforms move deterministically
 test('balance pass keeps armored power and mobility rewards in separate fighter niches', () => {
   const byId = Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, fighter]));
   assert.equal(byId.blaze.moves.groundSide.armor, undefined);
-  assert.ok(byId.blaze.moves.specialSide.damage <= 18);
-  assert.ok(byId.blaze.moves.specialSide.kx <= 470);
+  assert.ok(byId.blaze.weight <= 1.1);
+  assert.ok(byId.blaze.moves.specialSide.damage <= 17);
+  assert.ok(byId.blaze.moves.specialSide.kx <= 450);
+  assert.ok(byId.blaze.moves.specialSide.armorThreshold <= 9);
+  assert.ok(byId.blaze.moves.specialDown.active <= 8);
+  assert.ok(byId.blaze.moves.specialDown.recovery >= 27);
+  assert.ok(byId.blaze.moves.specialDown.counterReach <= 135);
+  assert.ok(byId.blaze.moves.specialUp.riseHorizontal >= 190);
+  assert.ok(byId.blaze.moves.specialDown.counterMultiplier <= 1.1);
+  assert.ok(byId.blaze.moves.specialDown.counterMinDamage <= 7);
   assert.ok(byId.volt.moves.specialSide.startup >= 6);
   assert.ok(byId.volt.moves.specialSide.recovery >= 17);
-  assert.ok(byId.bolt.moves.specialSide.kx >= 420);
+  assert.ok(byId.volt.moves.groundSide.damage >= 10);
+  assert.ok(byId.volt.moves.specialNeutral.chainRadius <= 80);
+  assert.ok(byId.bolt.moves.specialSide.kx >= 445);
+  assert.ok(byId.bolt.moves.specialSide.knockbackGrowth >= 1.12);
   assert.ok(byId.bolt.moves.specialUp.riseHorizontal >= 200);
+  assert.ok(byId.bolt.speed >= 1.06);
+  assert.ok(byId.bolt.air >= 1.04);
+  assert.ok(byId.bolt.weight >= 1.07);
+  assert.ok(byId.bolt.moves.dashAttack.recovery <= 12);
+  assert.ok(byId.bolt.moves.airNeutral.recovery <= 11);
+  assert.ok(byId.bolt.moves.airNeutral.damage >= 9.5);
+  assert.ok(byId.bolt.moves.airForward.knockbackGrowth >= 1.04);
+  assert.ok(byId.bolt.moves.airBack.knockbackGrowth >= 1.08);
+  assert.equal(byId.nova.moves.specialNeutral.maxActiveProjectiles, 1);
+  assert.ok(byId.nova.moves.airBack.knockbackGrowth >= 1.08);
+  assert.ok(byId.nova.moves.specialSide.recovery <= 13);
+  assert.ok(byId.nova.moves.specialSide.knockbackGrowth >= 1.15);
+  assert.equal(byId.nova.moves.specialDown.damage, 5);
+  assert.ok(byId.nova.moves.specialDown.trapLife <= 180);
+  assert.ok(byId.nova.moves.specialDown.reachX <= 105);
+  assert.ok(byId.nova.moves.specialDown.pullStrength <= .9);
+  const reactor = STAGES.find(stage => stage.id === 'reactor-core');
+  assert.ok(reactor.platforms[1].x - (reactor.platforms[0].x + reactor.platforms[0].w) <= 70);
 });
 
 test('Pulse Hammer uses common move data instead of scaling each fighter side smash', () => {
@@ -1338,7 +1367,7 @@ test('Blaze counter converts an incoming hit into a strong visible retaliation',
   for (let seq = 7; seq <= 9; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
 
   assert.equal(blaze.damage, 0);
-  assert.ok(attacker.damage >= 10 && attacker.damage < 14, `counter damage ${attacker.damage}`);
+  assert.ok(attacker.damage >= 7 && attacker.damage < 11, `counter damage ${attacker.damage}`);
   assert.ok(Math.hypot(attacker.vx, attacker.vy) >= 400, 'counter creates meaningful but bounded launch');
   assert.equal(attacker.action, null);
   assert.ok(attacker.tumbling && attacker.stun > 0);
@@ -1545,6 +1574,19 @@ test('armor only protects active frames and grabbing cancels the held fighter ac
   stepWorld(active, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
   for (let seq = 2; seq <= 5; seq++) stepWorld(active, { 0: frame(seq), 1: frame(seq) });
   assert.ok(blaze.damage > 0); assert.equal(blaze.stun, 0); assert.ok(blaze.action);
+
+  const broken = worldWith(), breaker = broken.players[0], armoredBlaze = broken.players[1];
+  breaker.x = 620; breaker.face = 1; armoredBlaze.x = 690;
+  const strongMove = { ...FIGHTERS.find(fighter => fighter.id === 'blaze').moves.groundSide };
+  const thresholdMove = { ...FIGHTERS.find(fighter => fighter.id === 'blaze').moves.specialSide, dash: false, defensiveOnly: true };
+  breaker.action = { name: 'groundSide', move: strongMove, frame: strongMove.startup - 1, startup: strongMove.startup, hit: [], activated: false };
+  breaker.actionName = 'groundSide';
+  armoredBlaze.action = { name: 'specialSide', move: thresholdMove, frame: thresholdMove.startup, startup: thresholdMove.startup, hit: [], activated: true };
+  armoredBlaze.actionName = 'specialSide';
+  stepWorld(broken, { 0: frame(1), 1: frame(1) });
+  assert.ok(armoredBlaze.damage >= strongMove.damage);
+  assert.ok(armoredBlaze.stun > 0);
+  assert.equal(armoredBlaze.action, null);
 
   const grab = worldWith();
   grab.players[1].x = 642;
