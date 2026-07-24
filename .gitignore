@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+.neon-secret
+*.pem
+*.key
+
+# Runtime data
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test and coverage output
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Build output and caches
+dist/
+build/
+.cache/
+.tmp/
+tmp/
+*.dockerbuild
+
+# Local Docker overrides
+compose.override.yaml
+docker-compose.override.yml
+
+# Editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

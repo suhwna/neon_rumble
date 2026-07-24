@@ -1,0 +1,18 @@
+{
+  "name": "neon-rumble-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Online 4-player browser platform brawler",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  }
+}

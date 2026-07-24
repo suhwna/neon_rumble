@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111426" />
+    <title>NEON RUMBLE — 4인 웹 난투</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game" aria-label="4인용 플랫폼 난투 게임"></canvas>
+
+      <section id="menu" class="overlay">
+        <div class="menu-card">
+          <div class="eyebrow"><span></span> ONLINE BATTLE ARENA</div>
+          <h1>NEON<br /><em>RUMBLE</em></h1>
+
+          <div class="identity-bar">
+            <input id="nickname-input" maxlength="16" autocomplete="nickname" placeholder="닉네임" aria-label="닉네임" />
+            <span id="stats-summary">0전 · 0승 · 0KO</span>
+          </div>
+
+          <div id="lobby-actions" class="lobby-actions">
+            <button id="create-button" class="lobby-button">새 방 만들기</button>
+            <button id="quick-button" class="lobby-button hot">빠른 매칭</button>
+            <button id="practice-button" class="lobby-button practice">혼자 연습</button>
+            <div class="join-box">
+              <input id="room-input" maxlength="5" autocomplete="off" placeholder="방 코드" aria-label="방 코드" />
+              <button id="join-button" class="lobby-button secondary">참가</button>
+            </div>
+          </div>
+          <section id="room-browser" class="room-browser" aria-label="참가 가능한 방 목록">
+            <header>
+              <button id="room-browser-refresh" type="button">새로고침</button>
+            </header>
+            <div id="room-browser-list" class="room-browser-list">
+              <p class="room-browser-empty">열린 방을 불러오는 중…</p>
+            </div>
+          </section>
+          <div id="queue-bar" class="queue-bar hidden"><span class="pulse-dot"></span><b>상대 검색 중</b><span id="queue-status">1번째 · 0초</span><button id="queue-cancel">취소</button></div>
+          <div id="room-bar" class="room-bar hidden">
+            <div><small>ROOM CODE</small><strong id="room-code">-----</strong></div>
+            <button id="copy-button">코드 복사</button>
+            <p id="lobby-status">플레이어를 기다리는 중…</p>
+          </div>
+          <div id="room-notice" class="room-notice hidden" aria-live="polite"></div>
+          <p id="connection-error" class="connection-error"></p>
+
+          <div id="room-settings" class="room-settings hidden">
+            <label>MODE<select id="mode-select"><option value="stock">목숨전</option><option value="time">시간전</option><option value="team">2대2 팀전</option></select></label>
+            <label>STAGE<select id="stage-select"><option value="neon-deck">Neon Deck</option><option value="sky-rail">Sky Rail</option><option value="reactor-core">Reactor Core</option></select></label>
+            <label>STOCKS<input id="stocks-input" type="number" min="1" max="9" value="3" /></label>
+            <label>TIME<input id="time-input" type="number" min="1" max="15" value="7" aria-label="제한 시간(분)" /></label>
+            <label class="toggle"><input id="items-toggle" type="checkbox" /> 아이템</label>
+            <label class="toggle"><input id="hazards-toggle" type="checkbox" /> 기믹</label>
+          </div>
+          <div id="player-list" class="player-list hidden"></div>
+        </div>
+      </section>
+
+      <section id="waiting-room" class="waiting-room hidden" aria-label="온라인 대기방">
+        <header class="waiting-topbar">
+          <div class="waiting-brand"><small>ONLINE WAITING ROOM</small><strong>FREE SPARRING</strong></div>
+          <div class="waiting-code"><small>ROOM CODE</small><b id="waiting-room-code">-----</b><button id="waiting-copy" type="button">복사</button></div>
+          <button id="waiting-leave" class="waiting-leave" type="button">방 나가기</button>
+        </header>
+        <aside class="waiting-roster-panel">
+          <div id="waiting-notice" class="room-notice hidden" aria-live="polite"></div>
+          <div id="waiting-roster-mount"></div>
+        </aside>
+        <section class="waiting-loadout">
+          <header><div><small>FIGHTER SETUP</small><!--<strong>캐릭터 선택 · 준비</strong></div><span>대기 중에는 자유롭게 움직이고 공격할 수 있습니다.</span>--></header>
+          <div id="waiting-settings-mount"></div>
+          <div id="waiting-fighter-mount">
+            <div class="fighter-grid" id="fighter-grid"></div>
+          </div>
+          <div id="waiting-palette-mount">
+            <div id="palette-selector" class="palette-selector" aria-label="공통 캐릭터 색상">
+              <span>COLOR</span>
+              <div id="palette-options" class="palette-options"></div>
+<!--              <small>캐릭터와 별도로 선택됩니다</small>-->
+            </div>
+          </div>
+          <footer>
+            <span id="waiting-ready-summary" class="waiting-ready-summary" aria-live="polite">캐릭터 선택 후 준비 버튼을 눌러주세요</span>
+            <button id="waiting-ready" type="button">준비하기</button>
+            <button id="waiting-start" type="button" disabled>본 경기 시작</button>
+          </footer>
+        </section>
+      </section>
+
+      <section id="countdown" class="countdown hidden" aria-live="polite"></section>
+
+      <section id="training-panel" class="training-panel hidden">
+        <div class="training-tools">
+          <header class="training-tools-header">
+            <span class="training-live-dot"></span>
+            <div><small>TRAINING MODE</small><strong>FRAME LAB</strong></div>
+            <kbd>LOCAL</kbd>
+            <button id="training-exit" type="button" title="연습을 종료하고 메인 화면으로 이동">EXIT</button>
+          </header>
+          <div class="training-tool-row">
+            <button class="training-tool" data-training="reset" title="캐릭터 위치와 피해율 초기화">
+              <span class="training-tool-glyph">↺</span><span><small>RESET</small><b>위치 초기화</b></span>
+            </button>
+            <button class="training-tool" data-training="pause" aria-pressed="false" title="게임 프레임 정지">
+              <span class="training-tool-glyph">Ⅱ</span><span><small>FRAME</small><b>프레임 정지</b></span>
+            </button>
+            <button class="training-tool" data-training="hitboxes" aria-pressed="false" title="공격·피격 판정 표시">
+              <span class="training-tool-glyph">＋</span><span><small>DEBUG</small><b>판정 표시</b></span>
+            </button>
+            <label class="training-cpu"><small>FIGHTER</small><select id="training-fighter-select" aria-label="연습 캐릭터"><option value="volt">VOLT</option><option value="blaze">BLAZE</option><option value="bolt">BOLT</option><option value="nova">NOVA</option></select></label>
+            <label class="training-cpu"><small>CPU LEVEL</small><select id="cpu-select" aria-label="CPU 난이도"><option value="dummy">DUMMY · 정지</option><option value="easy">EASY · 입문</option><option value="normal" selected>NORMAL · 실전</option><option value="hard">HARD · 고급</option></select></label>
+            <button id="training-tutorial-toggle" class="training-tool training-tool-wide">
+              <span class="training-tool-glyph">▶</span><span><small>ROOKIE COURSE</small><b>기본 튜토리얼</b></span>
+            </button>
+            <button id="training-guide-toggle" class="training-tool training-tool-wide" aria-expanded="false" aria-controls="training-guide">
+              <span class="training-tool-glyph">≡</span><span><small>COMMAND LIST</small><b>조작·기술 설명</b></span>
+            </button>
+          </div>
+        </div>
+        <aside id="training-tutorial" class="training-tutorial hidden" aria-live="polite" aria-label="기본 전투 튜토리얼">
+          <header>
+            <div><small>ROOKIE COURSE</small><strong id="tutorial-progress">1 / 12</strong></div>
+            <button id="tutorial-close" type="button" aria-label="튜토리얼 닫기">×</button>
+          </header>
+          <div class="tutorial-progress-track"><i id="tutorial-progress-bar"></i></div>
+          <section>
+            <span id="tutorial-category">이동 기초</span>
+            <h2 id="tutorial-title">좌우로 이동</h2>
+            <p id="tutorial-description">방향키로 거리를 벌렸다가 다시 접근하세요.</p>
+            <div class="tutorial-command"><kbd id="tutorial-command">← / →</kbd><b id="tutorial-goal">좌우로 100px 이동</b></div>
+            <p id="tutorial-tip">한 번 입력은 일반 이동, 같은 방향을 빠르게 두 번 입력하면 대시합니다.</p>
+          </section>
+          <footer>
+            <button id="tutorial-restart" type="button">처음부터</button>
+            <button id="tutorial-skip" type="button">단계 건너뛰기</button>
+          </footer>
+        </aside>
+        <aside id="training-guide" class="training-guide collapsed" aria-label="연습 모드 조작 및 기술 설명서">
+          <header><div><small>TRAINING MANUAL</small><strong id="training-guide-fighter">VOLT</strong></div><span id="training-guide-role">초고속 러시다운</span></header>
+          <section>
+            <h3>조작키</h3>
+            <div class="training-control-grid">
+              <p><kbd>← →</kbd><span>이동 · 두 번 입력 대시</span></p>
+              <p><kbd>↑</kbd><span>점프 · 공중에서 한 번 더</span></p>
+              <p><kbd>↓</kbd><span>하강 중 빠른 낙하 · 반투명 발판 통과</span></p>
+              <p><kbd>↑ + Z</kbd><span>동시 입력 시 숏홉 공중 공격</span></p>
+              <p><kbd>Z</kbd><span>짧게 기본 공격 · 홀드하면 스매시 충전</span></p>
+              <p><kbd>X</kbd><span>필살기 · 방향키로 변화</span></p>
+              <p><kbd>V</kbd><span>지상 잡기 · 공중에서는 회피 · 가까운 아이템 줍기</span></p>
+              <p><kbd>C</kbd><span>방어 · 지상/공중 회피 · 낙법</span></p>
+            </div>
+          </section>
+          <section>
+            <h3>이동·공격</h3>
+            <ul class="training-move-list">
+              <li><kbd>Z × 3</kbd><span><b>잽 연계</b> 빠른 3단 기본기</span></li>
+              <li><kbd>방향 → Z</kbd><span><b>틸트 공격</b> 방향을 먼저 누른 뒤 Z</span></li>
+              <li><kbd>Z 홀드</kbd><span><b>스매시 공격</b> 잠시 홀드해 충전, 놓아서 공격</span></li>
+              <li><kbd>방향 + Z 홀드</kbd><span><b>방향 스매시</b> 앞·위·아래 방향을 선택</span></li>
+              <li><kbd>공중 Z</kbd><span><b>공중기</b> 중립·앞·뒤·위·아래 5방향 공격</span></li>
+              <li><kbd>아이템 보유 Z</kbd><span><b>아이템 사용</b> 들고 있는 장비·소모품 발동</span></li>
+              <li><kbd>↑ 짧게</kbd><span><b>숏홉</b> 점프키를 빨리 놓아 낮게 점프</span></li>
+              <li><kbd>반대 방향</kbd><span><b>급정지</b> 대시 중 반대로 꺾어 제동·방향 전환</span></li>
+            </ul>
+          </section>
+          <section>
+            <h3>방어·회피</h3>
+            <ul class="training-move-list">
+              <li><kbd>C 유지</kbd><span><b>실드</b> 공격을 막지만 내구도가 0이면 실드 브레이크</span></li>
+              <li><kbd>공격 직전 C 탭</kbd><span><b>패링</b> 누른 직후 5프레임에 공격을 받아 공격자를 정지</span></li>
+              <li><kbd>←/→ + C</kbd><span><b>구르기</b> 이동하며 상대를 통과하는 지상 회피</span></li>
+              <li><kbd>↓ + C</kbd><span><b>제자리 회피</b> 막판에는 Z/X로 바로 반격 가능</span></li>
+              <li><kbd>공중 C</kbd><span><b>공중 회피</b> 중립은 관성 유지, 방향 입력 시 방향 회피</span></li>
+              <li><kbd>착지 직전 C</kbd><span><b>낙법</b> 튕겨 날아갈 때 착지 직전 입력</span></li>
+              <li><kbd>착지 전 방향+C</kbd><span><b>구르기 낙법</b> 입력 방향으로 낙법하며 이동</span></li>
+            </ul>
+            <p class="training-note">공중 회피는 한 번만 가능하며 착지·절벽 잡기 후 회복됩니다. 회피를 연속 사용하면 무적은 짧아지고 후딜은 늘어납니다.</p>
+          </section>
+          <section>
+            <h3>잡기·기상</h3>
+            <ul class="training-move-list">
+              <li><kbd>V</kbd><span><b>잡기</b> 실드 중 Z로도 잡기 가능</span></li>
+              <li><kbd>잡은 뒤 Z</kbd><span><b>잡기 타격</b> 짧게 때려 피해를 누적</span></li>
+              <li><kbd>잡은 뒤 방향</kbd><span><b>던지기</b> 앞·뒤·위·아래 네 방향 던지기</span></li>
+              <li><kbd>잡혔을 때 연타</kbd><span><b>잡기 탈출</b> 방향키와 Z/X/V/C를 빠르게 입력</span></li>
+              <li><kbd>다운 중 ←/→</kbd><span><b>기상 구르기</b> 입력 방향으로 무적 이동</span></li>
+              <li><kbd>다운 중 Z</kbd><span><b>기상 공격</b> 공격하며 일어나기</span></li>
+              <li><kbd>다운 중 ↑/C</kbd><span><b>제자리 기상</b> 짧은 무적과 함께 일어나기</span></li>
+            </ul>
+          </section>
+          <section>
+            <h3>절벽·복귀</h3>
+            <ul class="training-move-list">
+              <li><kbd>절벽 ↑</kbd><span><b>절벽 점프</b> 위로 뛰어 복귀</span></li>
+              <li><kbd>절벽 Z</kbd><span><b>절벽 공격</b> 올라오며 공격</span></li>
+              <li><kbd>절벽 C/안쪽</kbd><span><b>절벽 구르기</b> 무적으로 안쪽까지 이동</span></li>
+              <li><kbd>절벽 ↓</kbd><span><b>절벽 놓기</b> 매달리기를 취소하고 낙하</span></li>
+              <li><kbd>날아갈 때 방향</kbd><span><b>DI·공중 제어</b> 날아가는 각도와 감속 방향을 조절</span></li>
+              <li><kbd>피격 정지 중 방향</kbd><span><b>SDI</b> 강한 타격의 정지 순간에 위치를 미세 조절</span></li>
+            </ul>
+          </section>
+          <section>
+            <h3>캐릭터 필살기</h3>
+            <ul id="training-special-list" class="training-move-list"></ul>
+          </section>
+          <section>
+            <h3>전투 규칙·연습 도구</h3>
+            <ul class="training-move-list">
+              <li><kbd>피해 %</kbd><span><b>누적 피해</b> 높을수록 강한 공격에 더 멀리 날아감</span></li>
+              <li><kbd>기술 반복</kbd><span><b>원패턴 보정</b> 같은 기술을 반복하면 피해와 넉백이 약해짐</span></li>
+              <li><kbd>위 필살기</kbd><span><b>복귀 제한</b> 공중에서 한 번, 착지·절벽 후 다시 사용</span></li>
+              <li><kbd>위치/피해 초기화</kbd><span><b>리셋</b> 캐릭터 위치와 피해율을 즉시 초기화</span></li>
+              <li><kbd>일시정지</kbd><span><b>프레임 정지</b> 장면을 멈춰 자세와 판정을 확인</span></li>
+              <li><kbd>히트박스</kbd><span><b>판정 표시</b> 공격·피격 판정을 화면에 표시</span></li>
+              <li><kbd>CPU 선택</kbd><span><b>연습 상대</b> Normal이 기본값이며 Easy/Hard는 반응·방어·복귀·공격 판단력이 달라짐</span></li>
+            </ul>
+          </section>
+          <section class="training-input-section">
+            <div class="training-section-title"><h3>입력 기록</h3><button id="training-input-clear" type="button">기록 지우기</button></div>
+            <ol id="training-input-history" class="training-input-history"><li class="empty">키를 입력하면 순서대로 표시됩니다.</li></ol>
+          </section>
+          <footer><b>복귀 기본 순서</b><span>스테이지 방향으로 공중 제어 → 공중 점프 → 옆 필살기 → 위 필살기 → 필요할 때 방향 공중 회피</span></footer>
+        </aside>
+      </section>
+
+      <section id="result" class="overlay hidden">
+        <div class="result-card">
+          <div class="eyebrow"><span></span> BATTLE COMPLETE</div>
+          <p id="result-rank">WINNER</p>
+          <h2 id="winner-name">PLAYER 1</h2>
+          <div id="winner-avatar" class="winner-avatar"></div>
+          <button id="rematch-button"><span>다시 싸우기</span><kbd>ENTER</kbd></button>
+          <button id="menu-button" class="text-button">캐릭터 선택으로</button>
+        </div>
+      </section>
+
+      <button id="sound-button" aria-label="소리 켜기/끄기">♪</button>
+    </main>
+    <script src="/socket-client.js"></script>
+    <script src="/content.js"></script>
+    <script src="game.js"></script>
+  </body>
+</html>
