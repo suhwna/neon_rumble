@@ -8,7 +8,7 @@ const BLAST_TOP = -300;
 const BLAST_BOTTOM = WORLD_H + 260;
 const ACTION_BUFFER_FRAMES = 10;
 const JUMP_BUFFER_FRAMES = 10;
-const SMASH_HOLD_FRAMES = 7;
+const SMASH_HOLD_FRAMES = 10;
 const PARRY_FRAMES = 5;
 const bit = (buttons, flag) => (buttons & flag) !== 0;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -52,13 +52,13 @@ function createPlayer(entry, index, count, rules) {
     airDodgeAvailable: true, recoveryAvailable: true, ledge: null, ledgeInvincible: 0, canLedgeInvincible: true, ledgeGrabs: 0,
     grabbedBy: null, grabbing: null, grabFrames: 0, grabEscape: 0, grabPummelCooldown: 0, pendingThrow: null,
     comboCount: 0, comboTimer: 0, comboAttacker: null, lastDamager: null, staleQueue: [], jabStep: 0, jabTimer: 0,
-    charge: null, heldItem: null, jumpBuff: 0, projectileCooldown: 0, projectileCooldownMax: 0,
+    charge: null, heldItem: null, jumpBuff: 0, jumpBuffMultiplier: 1, projectileCooldown: 0, projectileCooldownMax: 0,
     respawn: 0, eliminated: false, disconnected: false,
     lastInput: { buttons: 0, horizontal: 0, vertical: 0, seq: 0 },
     ackSeq: 0, lastTapLeft: -999, lastTapRight: -999,
     landingLag: 0, pendingLandingLag: 0, skidFrames: 0, dashFrames: 0, hitId: 0, doubleJumpSerial: 0,
     coyoteFrames: 0, jumpBuffer: 0, actionBuffer: null,
-    tumbling: false, tumbleRecoverFrames: 0, techWindow: 0, knockdownFrames: 0, launchDecay: 0, sdiCooldown: 0, canSdi: false, lastSdiHorizontal: 0, lastSdiVertical: 0,
+    tumbling: false, tumbleRecoverFrames: 0, techWindow: 0, knockdownFrames: 0, launchDecay: 0, criticalFlightFrames: 0, sdiCooldown: 0, canSdi: false, lastSdiHorizontal: 0, lastSdiVertical: 0,
     dodgeFatigue: 0, dodgeFatigueCooldown: 0, shortHopFrames: 0, jumpSquatFrames: 0, jumpSquatShort: false, jumpSquatAttack: null, shieldBuffer: 0,
     dropThroughFrames: 0
   };
@@ -126,10 +126,10 @@ function resetPlayerState(world, player, options = {}) {
   player.stun = 0; player.hitstop = 0; player.dodgeFrames = 0; player.dodgeTotalFrames = 0; player.dodgeElapsed = 0; player.dodgeStartVx = 0; player.dodgeStartVy = 0; player.dodgeInitialVx = 0; player.dodgeInitialVy = 0; player.dodgeWindupFrames = 0; player.dodgeNeutral = false; player.landingLag = 0; player.pendingLandingLag = 0;
   player.shielding = false; player.parryFrames = 0; player.shieldStun = 0; player.shieldDropLag = 0; player.skidFrames = 0; player.dashFrames = 0; player.ledge = null; player.ledgeInvincible = 0; player.ledgeGrabs = 0; player.canLedgeInvincible = true;
   player.coyoteFrames = 0; player.jumpBuffer = 0; player.comboCount = 0; player.comboTimer = 0; player.comboAttacker = null; player.staleQueue = []; player.jabStep = 0; player.jabTimer = 0; player.lastDamager = null;
-  player.tumbling = false; player.tumbleRecoverFrames = 0; player.techWindow = 0; player.knockdownFrames = 0; player.launchDecay = 0; player.sdiCooldown = 0; player.canSdi = false; player.lastSdiHorizontal = 0; player.lastSdiVertical = 0;
+  player.tumbling = false; player.tumbleRecoverFrames = 0; player.techWindow = 0; player.knockdownFrames = 0; player.launchDecay = 0; player.criticalFlightFrames = 0; player.sdiCooldown = 0; player.canSdi = false; player.lastSdiHorizontal = 0; player.lastSdiVertical = 0;
   player.dodgeFatigue = 0; player.dodgeFatigueCooldown = 0; player.shortHopFrames = 0; player.jumpSquatFrames = 0; player.jumpSquatShort = false; player.jumpSquatAttack = null; player.shieldBuffer = 0; player.dropThroughFrames = 0; player.doubleJumpSerial = 0;
   player.grabEscape = 0; player.grabPummelCooldown = 0; player.pendingThrow = null;
-  player.projectileCooldown = 0; player.projectileCooldownMax = 0;
+  player.projectileCooldown = 0; player.projectileCooldownMax = 0; player.jumpBuff = 0; player.jumpBuffMultiplier = 1;
   player.invincible = options.invincible ?? 0; player.eliminated = false; player.disconnected = false;
 }
 
@@ -219,7 +219,7 @@ function processJumpSquat(world, player, input, previous) {
   const shortHop = player.jumpSquatShort, attack = player.jumpSquatAttack;
   player.jumpSquatFrames = 0; player.jumpSquatShort = false; player.jumpSquatAttack = null;
   player.shortHopFrames = shortHop ? 4 : 0;
-  player.vy = -(shortHop ? 470 : 590) * character.jump * (player.jumpBuff ? 1.45 : 1);
+  player.vy = -(shortHop ? 470 : 590) * character.jump * (player.jumpBuff ? player.jumpBuffMultiplier || 1.3 : 1);
   player.jumps = 1; player.coyoteFrames = 0; player.grounded = false; player.platformId = null; player.actionName = 'jump';
   player.tumbling = false; player.techWindow = 0;
   if (attack) {
@@ -436,24 +436,27 @@ function hitPlayer(world, attacker, target, move, direction) {
       contactX: (target.x + attacker.x) / 2,
       contactY: (target.y + attacker.y) / 2
     };
+    const counterConnected = Math.hypot(attacker.x - target.x, attacker.y - target.y) <= (definition.counterReach || 165);
     target.face = counterDirection;
     target.vx *= .25;
-    target.invincible = Math.max(target.invincible || 0, 8);
+    target.invincible = Math.max(target.invincible || 0, 6);
     target.action = {
       name: 'specialDown',
       move: { ...definition, counter: false, armor: false, startup: 0, active: 5, recovery: 13, cancelWindow: 4 },
       frame: 0, startup: 0, hit: [], activated: true, variant: 'counterSuccess'
     };
     target.actionName = 'specialDown';
-    const connected = hitPlayer(world, target, attacker, counterMove, counterDirection);
-    target.hitstop = Math.max(target.hitstop || 0, 10);
-    attacker.hitstop = Math.max(attacker.hitstop || 0, 13);
+    const connected = counterConnected && hitPlayer(world, target, attacker, counterMove, counterDirection);
+    target.hitstop = Math.max(target.hitstop || 0, connected ? 9 : 6);
+    if (connected) attacker.hitstop = Math.max(attacker.hitstop || 0, 11);
     emit(world, 'counter', {
       player: target.i, attacker: attacker.i,
       x: counterMove.contactX, y: counterMove.contactY,
-      damage: counterDamage, direction: counterDirection
+      damage: counterDamage, direction: counterDirection, connected
     });
-    return connected;
+    // A distant projectile is still negated, but the local counter strike does
+    // not magically damage its owner across the entire stage.
+    return true;
   }
   if (target.parryFrames > 0) {
     attacker.hitstop = Math.max(attacker.hitstop || 0, 16);
@@ -520,22 +523,46 @@ function hitPlayer(world, attacker, target, move, direction) {
   target.dropThroughFrames = 0;
   target.fastFalling = false;
   target.lastDamager = attacker.i; attacker.hitstop = Math.max(3, move.hitstop - 2); target.hitstop = move.hitstop;
-  const groundedFlinch = !!move.groundedFlinch && (target.grounded || !!interruptedDropPlatform) && !move.meteor;
-  const launchX = direction * (move.fixedKx ?? move.kx) * scale * rage * launchGrowth;
-  const launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) * scale : -Math.abs(move.fixedKy ?? move.ky) * Math.min(scale, 2.2)) * rage * launchGrowth;
+  const requestedGroundedFlinch = !!move.groundedFlinch && (target.grounded || !!interruptedDropPlatform) && !move.meteor;
+  // Grounded flinch is for the opening hits of a jab string, not a permanent
+  // frame trap. A third consecutive flinch pops the defender out far enough to
+  // DI, air-dodge or reset neutral instead of being pinned in place forever.
+  const groundedFlinch = requestedGroundedFlinch && target.comboCount <= 2;
+  let launchX = direction * (move.fixedKx ?? move.kx) * scale * rage * launchGrowth;
+  let launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) * scale : -Math.abs(move.fixedKy ?? move.ky) * Math.min(scale, 2.2)) * rage * launchGrowth;
+  if (requestedGroundedFlinch && !groundedFlinch) {
+    const escapePush = 150 + Math.min(3, target.comboCount - 3) * 22;
+    launchX = direction * Math.max(Math.abs(launchX) * 1.35, escapePush);
+    launchY = -Math.max(Math.abs(launchY), 125);
+  }
   const launch = groundedFlinch ? { vx: launchX, vy: 0 } : applyDirectionalInfluence(launchX, launchY, target.lastInput);
   target.vx = launch.vx; target.vy = launch.vy; target.canSdi = true; target.sdiCooldown = 1; target.lastSdiHorizontal = 0; target.lastSdiVertical = 0;
+  const uncappedLaunchSpeed = Math.hypot(target.vx, target.vy);
+  if (uncappedLaunchSpeed > 1120) {
+    const cap = 1120 / uncappedLaunchSpeed;
+    target.vx *= cap;
+    target.vy *= cap;
+  }
   const launchSpeed = Math.hypot(target.vx, target.vy);
   const critical = launchSpeed >= 720 || (target.damage >= 110 && launchSpeed >= 560);
+  const finisherFlight = !groundedFlinch && target.damage >= 110 && launchSpeed >= 620;
   target.launchDecay = clamp(5.2 + launchSpeed / 330, 6.2, 9.2);
+  target.criticalFlightFrames = finisherFlight ? clamp(Math.round(10 + (launchSpeed - 620) / 55), 10, 22) : 0;
   if (critical) {
     target.hitstop = Math.max(target.hitstop, Math.min(14, move.hitstop + 4));
     attacker.hitstop = Math.max(attacker.hitstop, Math.min(10, move.hitstop + 1));
   }
-  target.stun = armored ? 0 : move.hitstun != null ? clamp(Math.round(move.hitstun), 4, 60) : clamp(Math.round(10 + damage * 1.35 + launchSpeed / 75), 12, 60);
+  const baseHitstun = move.hitstun != null
+    ? clamp(Math.round(move.hitstun), 4, 60)
+    : clamp(Math.round(10 + damage * 1.35 + launchSpeed / 75), 12, 60);
+  // Damage scaling alone did not create an escape gap because authored
+  // hitstun values stayed constant. Long strings now loosen progressively,
+  // while the first three hits keep their intended combo timing.
+  const comboStunMultiplier = Math.max(.72, 1 - Math.max(0, target.comboCount - 3) * .07);
+  target.stun = armored ? 0 : Math.max(4, Math.round(baseHitstun * comboStunMultiplier));
   target.grounded = groundedFlinch; target.hitId += 1;
   if (!armored) target.tumbling = !groundedFlinch;
-  emit(world, 'hit', { attacker: attacker.i, player: target.i, damage, targetDamage: target.damage, comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y, power: move.hitstop, launchSpeed, launchAngle: Math.atan2(target.vy, target.vx), critical, quality: move.sweet ? 'sweet' : 'normal', color: colorOf(attacker) });
+  emit(world, 'hit', { attacker: attacker.i, player: target.i, damage, targetDamage: target.damage, comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y, power: move.hitstop, launchSpeed, launchAngle: Math.atan2(target.vy, target.vx), critical, finisherFlight, quality: move.sweet ? 'sweet' : 'normal', color: colorOf(attacker) });
   return true;
 }
 
@@ -787,21 +814,57 @@ function performAirDodge(player, input) {
   return true;
 }
 
+function startGetupAttack(world, player) {
+  const move = {
+    name: 'getupAttack',
+    motion: 'getupSweep',
+    startup: 4,
+    active: 4,
+    recovery: 20,
+    cancelWindow: 3,
+    damage: 6,
+    kx: 205,
+    ky: 125,
+    knockbackGrowth: .72,
+    hitstop: 5,
+    reachX: 92,
+    reachY: 48,
+    radial: true,
+    low: true
+  };
+  player.action = {
+    name: 'getupAttack',
+    move,
+    frame: 0,
+    startup: move.startup,
+    hit: [],
+    activated: false,
+    variant: 'getup'
+  };
+  player.actionName = 'getupAttack';
+  player.tumbling = false;
+  player.invincible = Math.max(player.invincible, 17);
+  emit(world, 'action', { player: player.i, action: 'getupAttack', variant: 'getup' });
+}
+
 function processKnockdown(world, player, input, previous) {
   if (player.knockdownFrames <= 0) return false;
   player.knockdownFrames -= 1;
   player.vx = approach(player.vx, 0, 70);
-  if (pressed(input, previous, BUTTONS.ATTACK)) {
-    player.knockdownFrames = 0; player.invincible = Math.max(player.invincible, 8);
-    startMove(world, player, 'groundNeutral'); player.actionName = 'getupAttack';
+  if (pressed(input, previous, BUTTONS.ATTACK) || bit(input.buttons, BUTTONS.ATTACK)) {
+    player.knockdownFrames = 0;
+    startGetupAttack(world, player);
     emit(world, 'getup', { player: player.i, option: 'attack' });
   } else if (Math.abs(input.horizontal) > 0.4) {
     const direction = Math.sign(input.horizontal);
     player.face = direction; player.knockdownFrames = 0;
-    performDodge(player, 'getupRoll', 20, 12, direction * 500 * characterOf(player).speed);
+    performDodge(player, 'getupRoll', 22, 17, direction * 560 * characterOf(player).speed);
     emit(world, 'getup', { player: player.i, option: 'roll', direction });
-  } else if (pressed(input, previous, BUTTONS.UP) || pressed(input, previous, BUTTONS.SHIELD) || player.knockdownFrames === 0) {
-    player.knockdownFrames = 0; player.dodgeFrames = 13; player.invincible = Math.max(player.invincible, 10);
+  } else if (pressed(input, previous, BUTTONS.UP) || bit(input.buttons, BUTTONS.UP)
+    || pressed(input, previous, BUTTONS.SHIELD) || bit(input.buttons, BUTTONS.SHIELD)
+    || player.knockdownFrames === 0) {
+    player.knockdownFrames = 0; player.dodgeFrames = 18; player.invincible = Math.max(player.invincible, 16);
+    player.dodgeTotalFrames = 18; player.dodgeElapsed = 0;
     player.actionName = 'getup'; player.tumbling = false;
     emit(world, 'getup', { player: player.i, option: 'neutral' });
   }
@@ -816,7 +879,7 @@ function tryLedge(world, player) {
       const belowTop = player.y >= platform.y - Math.min(18, player.height * .22);
       if (Math.abs(player.x - ledge.x) < 24 && belowTop && player.y < platform.y + 36) {
         player.ledge = { platformId: platform.id, x: ledge.x, y: platform.y, face: ledge.face };
-        player.x = ledge.x - ledge.face * 16; player.y = platform.y + 20; player.vx = 0; player.vy = 0;
+        player.x = ledge.x - ledge.face * 16; player.y = platform.y + 20; player.vx = 0; player.vy = 0; player.criticalFlightFrames = 0;
         player.face = ledge.face; player.actionName = 'ledge'; player.tumbling = false; player.techWindow = 0;
         player.jumps = Math.max(1, player.jumps); player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false;
         player.ledgeGrabs += 1;
@@ -853,15 +916,53 @@ function processLedge(world, player, input, previous) {
   return true;
 }
 
+function beginItemAction(world, player, name, move) {
+  player.action = {
+    name,
+    move: { cancelWindow: 0, ...move },
+    frame: 0,
+    startup: move.startup || 0,
+    hit: [],
+    activated: false,
+    variant: 'item'
+  };
+  player.actionName = name;
+  player.shielding = false;
+  player.parryFrames = 0;
+  player.tumbling = false;
+  player.tumbleRecoverFrames = 0;
+  player.techWindow = 0;
+  player.knockdownFrames = 0;
+  emit(world, 'action', { player: player.i, action: name, variant: 'item' });
+}
+
 function useHeldItem(world, player) {
   const item = player.heldItem;
   if (!item) return false;
-  if (item.kind === 'heal-shield') player.shield = Math.min(100, player.shield + item.amount);
-  else if (item.kind === 'jump') player.jumpBuff = item.duration;
-  else if (item.kind === 'melee') startMove(world, player, 'groundSide', 1.6);
-  else if (item.kind === 'blaster') spawnProjectile(world, player, { projectile: 'rail', damage: item.damage, kx: 420, ky: 120 });
-  else if (item.kind === 'mine') spawnTrap(world, player, { trap: 'mine', damage: item.damage, kx: 400, ky: 260, reachX: 100 });
-  else if (item.kind === 'bomb') world.entities.push({ id: world.nextEntityId++, type: 'bomb', owner: player.i, x: player.x, y: player.y, vx: player.face * 280, vy: -220, damage: item.damage, life: 90, color: item.color });
+  if (item.kind === 'heal-shield') {
+    player.shield = Math.min(100, player.shield + item.amount);
+    beginItemAction(world, player, 'itemBattery', { startup: 0, active: 1, recovery: 9, defensiveOnly: true, motion: 'deploy' });
+  } else if (item.kind === 'jump') {
+    player.jumpBuff = item.duration;
+    player.jumpBuffMultiplier = item.multiplier || 1.3;
+    beginItemAction(world, player, 'itemCoil', { startup: 0, active: 1, recovery: 11, defensiveOnly: true, motion: 'deploy' });
+  } else if (item.kind === 'melee') {
+    beginItemAction(world, player, 'itemHammer', {
+      startup: 10, active: 5, recovery: 24,
+      damage: item.damage, kx: 455, ky: 185,
+      reachX: 106, reachY: 62, hitstop: 9,
+      knockbackGrowth: 1.08, motion: 'hammer'
+    });
+  } else if (item.kind === 'blaster') {
+    spawnProjectile(world, player, { projectile: 'rail', projectileSpeed: 690, projectileRadius: 18, damage: item.damage, kx: 390, ky: 110 });
+    beginItemAction(world, player, 'itemBlaster', { startup: 0, active: 1, recovery: 14, defensiveOnly: true, motion: 'cannon' });
+  } else if (item.kind === 'mine') {
+    spawnTrap(world, player, { trap: 'mine', damage: item.damage, kx: 390, ky: 250, reachX: 92 });
+    beginItemAction(world, player, 'itemMine', { startup: 0, active: 1, recovery: 17, defensiveOnly: true, motion: 'deploy' });
+  } else if (item.kind === 'bomb') {
+    world.entities.push({ id: world.nextEntityId++, type: 'bomb', owner: player.i, x: player.x, y: player.y, vx: player.face * 280, vy: -220, damage: item.damage, life: 90, color: item.color });
+    beginItemAction(world, player, 'itemBomb', { startup: 0, active: 1, recovery: 18, defensiveOnly: true, motion: 'throw' });
+  }
   item.uses -= 1; if (item.uses <= 0) player.heldItem = null;
   emit(world, 'item-use', { player: player.i, item: item.id }); return true;
 }
@@ -1144,7 +1245,7 @@ function updatePlayer(world, player, rawInput) {
       if (player.grounded) beginJumpSquat(player);
       else {
         const doubleJump = player.coyoteFrames === 0 && player.jumps === 1;
-        player.vy = -520 * character.jump * (player.jumpBuff ? 1.45 : 1);
+        player.vy = -520 * character.jump * (player.jumpBuff ? player.jumpBuffMultiplier || 1.3 : 1);
         player.jumps -= 1;
         if (doubleJump) player.doubleJumpSerial = (player.doubleJumpSerial || 0) + 1;
         player.jumpBuffer = 0; player.coyoteFrames = 0; player.grounded = false; player.actionName = 'jump';
@@ -1156,16 +1257,33 @@ function updatePlayer(world, player, rawInput) {
   if (fastFallAllowed && input.vertical > 0.55 && player.vy > 0) player.fastFalling = true;
   if (!player.grounded && player.shortHopFrames === 0 && !player.action?.move?.recoveryMove && released(input, previous, BUTTONS.UP) && player.vy < -220) player.vy *= .58;
   if (player.stun > 0) {
-    const horizontal = Math.abs(input.horizontal) > .12 ? input.horizontal : 0;
-    const braking = horizontal && Math.sign(horizontal) !== Math.sign(player.vx);
-    player.vx += horizontal * (braking ? 17 : 11);
-    if (!player.grounded && input.vertical > .55 && player.vy > -80) player.vy += 3.5;
-    const launchDecay = player.launchDecay || 6.2;
-    player.vx = approach(player.vx, 0, launchDecay * (horizontal ? .72 : 1));
-    player.vy = approach(player.vy, 0, launchDecay * .58);
-    player.vx = clamp(player.vx, -1120, 1120); player.vy = clamp(player.vy, -1160, 1160);
+    const finisherFlight = player.criticalFlightFrames > 0;
+    const horizontal = !finisherFlight && Math.abs(input.horizontal) > .12 ? input.horizontal : 0;
+    if (finisherFlight) {
+      // Preserve the authored launch angle for the opening burst. Equal damping on
+      // both axes keeps the flight line straight before normal DI and gravity resume.
+      player.vx *= .996;
+      player.vy *= .996;
+      const speed = Math.hypot(player.vx, player.vy);
+      if (speed > 1120) {
+        const cap = 1120 / speed;
+        player.vx *= cap;
+        player.vy *= cap;
+      }
+    } else {
+      const braking = horizontal && Math.sign(horizontal) !== Math.sign(player.vx);
+      player.vx += horizontal * (braking ? 17 : 11);
+      if (!player.grounded && input.vertical > .55 && player.vy > -80) player.vy += 3.5;
+      const launchDecay = player.launchDecay || 6.2;
+      player.vx = approach(player.vx, 0, launchDecay * (horizontal ? .72 : 1));
+      player.vy = approach(player.vy, 0, launchDecay * .58);
+    }
+    if (!finisherFlight) {
+      player.vx = clamp(player.vx, -1120, 1120);
+      player.vy = clamp(player.vy, -1160, 1160);
+    }
     player.actionName = player.grounded && !player.tumbling ? 'groundHit' : 'tumble';
-  } else player.launchDecay = 0;
+  } else { player.launchDecay = 0; player.criticalFlightFrames = 0; }
   if (player.dodgeFrames > 0) {
     const groundRoll = player.grounded
       && ['roll', 'techRoll', 'getupRoll', 'ledgeRoll'].includes(player.actionName);
@@ -1204,8 +1322,10 @@ function updatePlayer(world, player, rawInput) {
   const oldY = player.y;
   const standingPlatform = player.grounded ? world.platforms.find(platform => platform.id === player.platformId) : null;
   if (canGroundMove && standingPlatform?.passThrough && pressed(input, previous, BUTTONS.DOWN)) player.dropThroughFrames = 8;
-  player.vy += player.fastFalling ? 38 : 24;
+  const finisherFlight = player.criticalFlightFrames > 0;
+  if (!finisherFlight) player.vy += player.fastFalling ? 38 : 24;
   player.x += player.vx / TICK_RATE; player.y += player.vy / TICK_RATE;
+  if (finisherFlight) player.criticalFlightFrames -= 1;
   const dropping = player.dropThroughFrames > 0;
   const landing = findLanding(player, oldY, world.platforms, dropping);
   if (landing) {
@@ -1214,7 +1334,7 @@ function updatePlayer(world, player, rawInput) {
     const landingLag = currentLandingLag(player);
     player.y = landing.y - player.height / 2; player.vy = 0; player.grounded = true; player.platformId = landing.id;
     if (wasAirborne) player.vx *= landingLag ? .84 : .88;
-    player.jumps = 2; player.coyoteFrames = 6; player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false; player.canLedgeInvincible = true; player.ledgeGrabs = 0;
+    player.jumps = 2; player.coyoteFrames = 6; player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false; player.criticalFlightFrames = 0; player.canLedgeInvincible = true; player.ledgeGrabs = 0;
     if (wasAirborne && player.actionName === 'airDodge') {
       const neutralAirDodge = !!player.dodgeNeutral;
       player.dodgeFrames = 0; player.dodgeTotalFrames = 0; player.dodgeElapsed = 0;
@@ -1272,7 +1392,7 @@ function knockout(world, player) {
   }
   player.x = -999; player.y = -999; player.vx = 0; player.vy = 0;
   player.action = null; player.actionBuffer = null; player.shielding = false; player.ledge = null; player.dodgeFrames = 0;
-  player.tumbling = false; player.techWindow = 0; player.knockdownFrames = 0;
+  player.tumbling = false; player.techWindow = 0; player.knockdownFrames = 0; player.criticalFlightFrames = 0;
 }
 
 function projectileClashPower(entity) {
@@ -1358,7 +1478,10 @@ function updateEntities(world) {
       const contactAngle = touchedHurtbox ? Math.atan2(touchedHurtbox.y - entity.y, touchedHurtbox.x - entity.x) : 0;
       const entityMove = touchedHurtbox ? {
         name: entity.kind || entity.type, projectile: entity.type === 'projectile',
-        damage: entity.damage, kx: entity.kx || 360, ky: entity.ky || 180, hitstop: 6,
+        damage: entity.damage, kx: entity.kx || 360, ky: entity.ky || 180,
+        fixedKx: entity.fixedKx, fixedKy: entity.fixedKy,
+        knockbackGrowth: entity.knockbackGrowth, groundedFlinch: entity.groundedFlinch,
+        hitstop: entity.hitstop ?? 6, hitstun: entity.hitstun,
         contactX: entity.x + Math.cos(contactAngle) * radius,
         contactY: entity.y + Math.sin(contactAngle) * radius
       } : null;
@@ -1463,7 +1586,7 @@ function cpuTarget(world, player) {
     .map(other => {
       const distance = Math.hypot(other.x - player.x, (other.y - player.y) * .72);
       const threat = other.action ? 55 : 0;
-      const vulnerable = other.stun > 0 || other.landingLag > 0 ? 45 : 0;
+      const vulnerable = other.stun > 0 || other.landingLag > 0 ? 18 : 0;
       return { other, score: distance + threat - vulnerable };
     })
     .sort((a, b) => a.score - b.score)[0]?.other;
@@ -1649,7 +1772,9 @@ function stepWorld(world, inputs = {}) {
     return world;
   }
   if (world.phase !== 'active') return world;
-  if (world.rules.mode === 'time' || world.rules.timeSeconds) world.remainingTicks = Math.max(0, world.remainingTicks - 1);
+  if (world.rules.mode !== 'training' && (world.rules.mode === 'time' || world.rules.timeSeconds)) {
+    world.remainingTicks = Math.max(0, world.remainingTicks - 1);
+  }
 
   const resolvedInputs = new Map();
   for (const player of world.players) {
@@ -1719,7 +1844,22 @@ function publicSnapshot(world) {
           : !action.move.projectileOnly && !action.move.trapOnly && !action.move.defensiveOnly && hasAttackGeometry(action.move) ? attackHitbox(player, action.move) : null
         : null;
       const strikePoints = actionHitbox ? visualStrikePoints(player, action?.move || {}, action?.name, actionHitbox) : [];
-      return { ...player, action: undefined, lastInput: undefined, hurtboxes: playerHurtboxes(player), actionFrame: action?.frame || 0, actionPhase, actionVariant: action?.variant || null, phaseProgress, actionHitbox, strikePoints, chargeFrames: action?.charging ? action.holdFrames : 0, chargeScale: action?.chargeScale || 1 };
+      return {
+        ...player,
+        action: undefined,
+        lastInput: undefined,
+        hurtboxes: playerHurtboxes(player),
+        actionFrame: action?.frame || 0,
+        actionPhase,
+        actionVariant: action?.variant || null,
+        actionMotion: action?.move?.motion || null,
+        actionTiming: action ? { startup, active: action.move.active, recovery: action.move.recovery } : null,
+        phaseProgress,
+        actionHitbox,
+        strikePoints,
+        chargeFrames: action?.charging ? action.holdFrames : 0,
+        chargeScale: action?.chargeScale || 1
+      };
     }),
     entities: world.entities, items: world.items.map(item => ({ ...item, definition: item.definition })),
     events: world.events.slice(-20)
@@ -1731,9 +1871,15 @@ function trainingCommand(world, command) {
   if (command.type === 'pause') world.training.paused = !!command.value;
   else if (command.type === 'hitboxes') world.training.showHitboxes = !!command.value;
   else if (command.type === 'cpu') world.training.cpu = ['dummy', 'easy', 'normal', 'hard'].includes(command.value) ? command.value : 'dummy';
-  else if (command.type === 'reset') for (const player of world.players) {
-    resetPlayerState(world, player, { x: 640 + (player.i - 0.5) * 160, y: 300, damage: player.i ? clamp(Number(command.damage) || 0, 0, 999) : 0 });
-    player.respawn = 0; player.shield = 100;
+  else if (command.type === 'reset') {
+    world.entities = [];
+    world.items = [];
+    for (const player of world.players) {
+      resetPlayerState(world, player, { x: 640 + (player.i - 0.5) * 160, y: 300, damage: player.i ? clamp(Number(command.damage) || 0, 0, 999) : 0 });
+      player.respawn = 0; player.shield = 100; player.heldItem = null;
+    }
+  } else {
+    return false;
   }
   return true;
 }

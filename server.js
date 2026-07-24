@@ -70,7 +70,7 @@ function createRoom(owner, options = {}) {
   const code = makeCode();
   const room = {
     code, ownerClientId: owner.clientId, quick: !!options.quick,
-    rules: normalizeRules(options.rules || DEFAULT_RULES), slots: [],
+    rules: normalizeRules({ ...(options.rules || DEFAULT_RULES), items: false }), slots: [],
     inputs: {}, world: null, warmupWorld: null, playing: false, recorded: false, createdAt: Date.now()
   };
   rooms.set(code, room); return room;
@@ -109,7 +109,6 @@ function publicRoomDirectory() {
         code: room.code,
         mode: room.rules.mode,
         stageId: room.rules.stageId,
-        items: room.rules.items,
         hazards: room.rules.hazards,
         playerCount: connected.length,
         capacity: 4,
@@ -134,7 +133,7 @@ function refreshWarmup(room) {
     rules: { ...room.rules, mode: 'training', items: false, hazards: false },
     roster,
     seed: Date.now(),
-    cpu: 'normal'
+    cpu: 'dummy'
   });
   room.warmupWorld.phase = 'active';
   room.warmupWorld.countdown = 0;
@@ -216,7 +215,7 @@ function syncWarmupRoster(room) {
   for (const player of [...world.players]) if (!wantedIds.has(player.clientId)) removeWarmupPlayer(world, player);
   for (const [index, entry] of roster.entries()) {
     if (world.players.some(player => player.clientId === entry.clientId)) continue;
-    const temporary = createWorld({ rules: world.rules, roster: [entry], seed: Date.now() + index, cpu: 'normal' });
+    const temporary = createWorld({ rules: world.rules, roster: [entry], seed: Date.now() + index, cpu: 'dummy' });
     const player = temporary.players[0];
     player.x = 460 + entry.slot * 120;
     player.y = 220;
@@ -232,7 +231,7 @@ function startRoom(room) {
   if (room.playing || room.slots.length < (room.rules.mode === 'training' ? 1 : 2)) return false;
   const roster = room.slots.map(slot => ({ slot: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId, palette: slot.palette, team: slot.team }));
   if (room.rules.mode === 'training' && roster.length === 1) roster.push({ slot: 1, clientId: 'cpu:training', nickname: 'BOT', characterId: 'blaze', palette: 0, team: 1 });
-  room.world = createWorld({ rules: room.rules, roster, seed: Date.now(), cpu: 'normal' });
+  room.world = createWorld({ rules: room.rules, roster, seed: Date.now(), cpu: 'dummy' });
   room.warmupWorld = null;
   room.world.countdown = countdownTicks;
   room.playing = true; room.recorded = false;
@@ -376,7 +375,7 @@ io.on('connection', socket => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.playing || room.ownerClientId !== socket.data.identity?.clientId) return reply?.({ ok: false, error: '설정 권한이 없습니다.' });
     const previousStageId = room.rules.stageId;
-    room.rules = normalizeRules({ ...room.rules, ...rules });
+    room.rules = normalizeRules({ ...room.rules, ...rules, items: false });
     updateWarmupRules(room, previousStageId);
     reply?.({ ok: true, rules: room.rules }); emitRoom(room);
   });
@@ -452,9 +451,15 @@ io.on('connection', socket => {
     room.inputs[slot.index] = { seq, clientTime: Number(payload?.clientTime) || 0, buttons, pressedButtons, horizontal, vertical };
   });
 
-  socket.on('training:command', command => {
+  socket.on('training:command', (command, reply) => {
     const room = rooms.get(socket.data.roomCode);
-    if (room?.ownerClientId === socket.data.identity?.clientId && room.world) trainingCommand(room.world, command || {});
+    const slot = room?.slots.find(item => item.socketId === socket.id);
+    if (room?.ownerClientId === socket.data.identity?.clientId && room.world && slot) {
+      const accepted = trainingCommand(room.world, { ...(command || {}), player: slot.index });
+      reply?.({ ok: accepted });
+      return;
+    }
+    reply?.({ ok: false, error: '연습 명령을 사용할 수 없습니다.' });
   });
   socket.on('latency:ping', (clientTime, reply) => reply?.({ clientTime, serverTime: Date.now() }));
   socket.on('stats:get', reply => reply?.(socket.data.identity ? store.getPlayer(socket.data.identity.clientId) : null));

@@ -52,7 +52,6 @@
             <label>STAGE<select id="stage-select"><option value="neon-deck">Neon Deck</option><option value="sky-rail">Sky Rail</option><option value="reactor-core">Reactor Core</option></select></label>
             <label>STOCKS<input id="stocks-input" type="number" min="1" max="9" value="3" /></label>
             <label>TIME<input id="time-input" type="number" min="1" max="15" value="7" aria-label="제한 시간(분)" /></label>
-            <label class="toggle"><input id="items-toggle" type="checkbox" /> 아이템</label>
             <label class="toggle"><input id="hazards-toggle" type="checkbox" /> 기믹</label>
           </div>
           <div id="player-list" class="player-list hidden"></div>
@@ -111,7 +110,7 @@
               <span class="training-tool-glyph">＋</span><span><small>DEBUG</small><b>판정 표시</b></span>
             </button>
             <label class="training-cpu"><small>FIGHTER</small><select id="training-fighter-select" aria-label="연습 캐릭터"><option value="volt">VOLT</option><option value="blaze">BLAZE</option><option value="bolt">BOLT</option><option value="nova">NOVA</option></select></label>
-            <label class="training-cpu"><small>CPU LEVEL</small><select id="cpu-select" aria-label="CPU 난이도"><option value="dummy">DUMMY · 정지</option><option value="easy">EASY · 입문</option><option value="normal" selected>NORMAL · 실전</option><option value="hard">HARD · 고급</option></select></label>
+            <label class="training-cpu"><small>CPU LEVEL</small><select id="cpu-select" aria-label="CPU 난이도"><option value="dummy" selected>DUMMY · 정지</option><option value="easy">EASY · 입문</option><option value="normal">NORMAL · 실전</option><option value="hard">HARD · 고급</option></select></label>
             <button id="training-tutorial-toggle" class="training-tool training-tool-wide">
               <span class="training-tool-glyph">▶</span><span><small>ROOKIE COURSE</small><b>기본 튜토리얼</b></span>
             </button>
@@ -149,7 +148,7 @@
               <p><kbd>↑ + Z</kbd><span>동시 입력 시 숏홉 공중 공격</span></p>
               <p><kbd>Z</kbd><span>짧게 기본 공격 · 홀드하면 스매시 충전</span></p>
               <p><kbd>X</kbd><span>필살기 · 방향키로 변화</span></p>
-              <p><kbd>V</kbd><span>지상 잡기 · 공중에서는 회피 · 가까운 아이템 줍기</span></p>
+              <p><kbd>V</kbd><span>지상 잡기 · 공중에서는 회피</span></p>
               <p><kbd>C</kbd><span>방어 · 지상/공중 회피 · 낙법</span></p>
             </div>
           </section>
@@ -161,7 +160,6 @@
               <li><kbd>Z 홀드</kbd><span><b>스매시 공격</b> 잠시 홀드해 충전, 놓아서 공격</span></li>
               <li><kbd>방향 + Z 홀드</kbd><span><b>방향 스매시</b> 앞·위·아래 방향을 선택</span></li>
               <li><kbd>공중 Z</kbd><span><b>공중기</b> 중립·앞·뒤·위·아래 5방향 공격</span></li>
-              <li><kbd>아이템 보유 Z</kbd><span><b>아이템 사용</b> 들고 있는 장비·소모품 발동</span></li>
               <li><kbd>↑ 짧게</kbd><span><b>숏홉</b> 점프키를 빨리 놓아 낮게 점프</span></li>
               <li><kbd>반대 방향</kbd><span><b>급정지</b> 대시 중 반대로 꺾어 제동·방향 전환</span></li>
             </ul>
@@ -215,7 +213,7 @@
               <li><kbd>위치/피해 초기화</kbd><span><b>리셋</b> 캐릭터 위치와 피해율을 즉시 초기화</span></li>
               <li><kbd>일시정지</kbd><span><b>프레임 정지</b> 장면을 멈춰 자세와 판정을 확인</span></li>
               <li><kbd>히트박스</kbd><span><b>판정 표시</b> 공격·피격 판정을 화면에 표시</span></li>
-              <li><kbd>CPU 선택</kbd><span><b>연습 상대</b> Normal이 기본값이며 Easy/Hard는 반응·방어·복귀·공격 판단력이 달라짐</span></li>
+              <li><kbd>CPU 선택</kbd><span><b>연습 상대</b> Dummy가 기본값이며 Easy/Normal/Hard는 반응·방어·복귀·공격 판단력이 달라짐</span></li>
             </ul>
           </section>
           <section class="training-input-section">

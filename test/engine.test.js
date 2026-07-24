@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BUTTONS, FIGHTERS } = require('../content');
+const { BUTTONS, FIGHTERS, ITEMS } = require('../content');
 const { BLAST_MARGIN_X, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer } = require('../engine');
 
 function worldWith(rules = {}) {
@@ -284,7 +284,9 @@ test('short attack taps create tilts, holding Z creates a smash, and X remains a
 
   const smash = worldWith();
   stepWorld(smash, { 0: frame(1, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(1) });
-  for (let seq = 2; seq <= 8; seq++) stepWorld(smash, { 0: frame(seq, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(seq) });
+  for (let seq = 2; seq <= 10; seq++) stepWorld(smash, { 0: frame(seq, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(seq) });
+  assert.equal(smash.players[0].action, null);
+  stepWorld(smash, { 0: frame(11, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(11) });
   assert.equal(smash.players[0].action?.name, 'groundDown');
   assert.equal(smash.players[0].action?.variant, 'smash');
   assert.equal(smash.players[0].action?.move.chargeable, true);
@@ -485,23 +487,34 @@ test('high-percent finishers retain enough launch momentum to travel a visibly g
   const launchAt = damage => {
     const world = worldWith(), target = world.players[1];
     target.damage = damage;
-    for (let seq = 1; seq <= 8; seq++) stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
-    stepWorld(world, { 0: frame(9, BUTTONS.RIGHT, 1), 1: frame(9) });
-    let seq = 10;
-    while (seq <= 20 && !world.events.some(event => event.type === 'hit' && event.player === target.i)) {
+    for (let seq = 1; seq <= 11; seq++) stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
+    stepWorld(world, { 0: frame(12, BUTTONS.RIGHT, 1), 1: frame(12) });
+    let seq = 13;
+    while (seq <= 24 && !world.events.some(event => event.type === 'hit' && event.player === target.i)) {
       stepWorld(world, { 0: frame(seq), 1: frame(seq) }); seq += 1;
     }
     const hit = world.events.find(event => event.type === 'hit' && event.player === target.i);
     const startX = target.x;
     let farthestX = startX;
+    let finisherFrames = 0;
+    let maxAngleDrift = 0;
+    const launchAngle = Math.atan2(target.vy, target.vx);
     for (let count = 0; count < 42; count++, seq++) {
       stepWorld(world, { 0: frame(seq), 1: frame(seq) });
       farthestX = Math.max(farthestX, target.x);
+      if (target.criticalFlightFrames > 0 && target.hitstop === 0) {
+        finisherFrames += 1;
+        const angle = Math.atan2(target.vy, target.vx);
+        maxAngleDrift = Math.max(maxAngleDrift, Math.abs(Math.atan2(Math.sin(angle - launchAngle), Math.cos(angle - launchAngle))));
+      }
     }
-    return { distance: farthestX - startX, launchSpeed: hit?.launchSpeed || 0 };
+    return { distance: farthestX - startX, launchSpeed: hit?.launchSpeed || 0, finisherFlight: hit?.finisherFlight, finisherFrames, maxAngleDrift };
   };
   const fresh = launchAt(0), high = launchAt(180);
   assert.ok(high.launchSpeed > 900, `expected a fast high-percent launch, got ${high.launchSpeed}`);
+  assert.equal(high.finisherFlight, true);
+  assert.ok(high.finisherFrames >= 8, `expected a sustained straight finisher burst, got ${high.finisherFrames} frames`);
+  assert.ok(high.maxAngleDrift < 0.002, `expected the opening launch angle to stay straight, drifted ${high.maxAngleDrift}`);
   assert.ok(high.distance > 300, `expected travel above 300px, got ${high.distance}`);
   assert.ok(high.distance > fresh.distance * 1.65, `expected clear percent scaling: ${high.distance} vs ${fresh.distance}`);
 });
@@ -601,13 +614,43 @@ test('a missed tech causes knockdown with roll, neutral, and attack get-up choic
   stepWorld(rolling, { 0: frame(1), 1: frame(1) });
   assert.equal(roller.actionName, 'knockdown'); assert.ok(roller.knockdownFrames > 0);
   stepWorld(rolling, { 0: frame(2, BUTTONS.LEFT, -1), 1: frame(2) });
-  assert.equal(roller.actionName, 'getupRoll'); assert.ok(roller.vx < 0);
+  assert.equal(roller.actionName, 'getupRoll'); assert.ok(roller.vx < 0); assert.ok(roller.invincible >= 16);
 
   const attacking = worldWith(), attacker = attacking.players[0];
   launchTowardFloor(attacking, attacker);
   stepWorld(attacking, { 0: frame(1), 1: frame(1) });
   stepWorld(attacking, { 0: frame(2, BUTTONS.ATTACK), 1: frame(2) });
-  assert.equal(attacker.actionName, 'getupAttack'); assert.equal(attacker.action?.name, 'groundNeutral');
+  assert.equal(attacker.actionName, 'getupAttack'); assert.equal(attacker.action?.name, 'getupAttack');
+  assert.equal(attacker.action?.move?.radial, true); assert.ok(attacker.invincible >= 16);
+});
+
+test('get-up attack buffers held input, protects startup, and strikes on both sides', () => {
+  const world = worldWith(), defender = world.players[0], opponent = world.players[1];
+  defender.knockdownFrames = 30; defender.actionName = 'knockdown'; defender.tumbling = false;
+  defender.x = 640; opponent.x = 585; opponent.invincible = 0;
+  stepWorld(world, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.equal(defender.actionName, 'getupAttack');
+  assert.ok(defender.invincible >= 16);
+  for (let seq = 2; seq <= 6; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.ok(opponent.damage > 0, 'the rear sweep creates space behind the waking fighter');
+});
+
+test('neutral get-up has enough invincibility to escape a meaty long-range hit', () => {
+  const world = worldWith(), defender = world.players[0], attacker = world.players[1];
+  defender.knockdownFrames = 30; defender.actionName = 'knockdown'; defender.x = 640;
+  attacker.x = 760; attacker.face = -1;
+  stepWorld(world, { 0: frame(1, BUTTONS.UP), 1: frame(1) });
+  assert.equal(defender.actionName, 'getup');
+  const damage = defender.damage;
+  for (let seq = 2; seq <= 12; seq++) {
+    world.entities.push({
+      id: 2000 + seq, type: 'projectile', owner: attacker.i, kind: `meaty-${seq}`,
+      x: defender.x, y: defender.y, vx: 0, vy: 0, damage: 4, kx: 180, ky: 80,
+      life: 2, radius: 32, hitPlayers: []
+    });
+    stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  }
+  assert.equal(defender.damage, damage);
 });
 
 test('down-shield spot dodges, repeated dodges gain recovery, and shield-attack grabs', () => {
@@ -638,6 +681,55 @@ test('items spawn with a two-item cap and stage platforms move deterministically
   world.nextItemTick = world.tick;
   stepWorld(world, { 0: frame(12), 1: frame(12) });
   assert.equal(world.items.length, 2);
+});
+
+test('balance pass keeps armored power and mobility rewards in separate fighter niches', () => {
+  const byId = Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, fighter]));
+  assert.equal(byId.blaze.moves.groundSide.armor, undefined);
+  assert.ok(byId.blaze.moves.specialSide.damage <= 18);
+  assert.ok(byId.blaze.moves.specialSide.kx <= 470);
+  assert.ok(byId.volt.moves.specialSide.startup >= 6);
+  assert.ok(byId.volt.moves.specialSide.recovery >= 17);
+  assert.ok(byId.bolt.moves.specialSide.kx >= 420);
+  assert.ok(byId.bolt.moves.specialUp.riseHorizontal >= 200);
+});
+
+test('Pulse Hammer uses common move data instead of scaling each fighter side smash', () => {
+  const hammer = ITEMS.find(item => item.id === 'pulse-hammer');
+  const damageByFighter = [];
+  for (const characterId of ['volt', 'blaze', 'bolt', 'nova']) {
+    const world = worldWith(), player = world.players[0];
+    player.characterId = characterId;
+    player.heldItem = { ...hammer };
+    stepWorld(world, { 0: tap(1, BUTTONS.ATTACK), 1: frame(1) });
+    assert.equal(player.actionName, 'itemHammer');
+    assert.equal(player.action?.move?.damage, hammer.damage);
+    assert.equal(player.action?.move?.startup, 10);
+    assert.equal(player.action?.move?.recovery, 24);
+    damageByFighter.push(player.action.move.damage);
+  }
+  assert.equal(new Set(damageByFighter).size, 1);
+});
+
+test('instant-use items apply recovery and Jump Coil respects its authored multiplier', () => {
+  const rail = worldWith(), shooter = rail.players[0];
+  rail.players[1].x = 1000;
+  shooter.heldItem = { ...ITEMS.find(item => item.id === 'rail-blaster') };
+  stepWorld(rail, { 0: tap(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.equal(shooter.actionName, 'itemBlaster');
+  assert.equal(shooter.action?.move?.recovery, 14);
+  assert.equal(rail.entities.filter(entity => entity.kind === 'rail').length, 1);
+  stepWorld(rail, { 0: frame(2), 1: frame(2) });
+  stepWorld(rail, { 0: tap(3, BUTTONS.ATTACK), 1: frame(3) });
+  assert.equal(rail.entities.filter(entity => entity.kind === 'rail').length, 1);
+
+  const coil = worldWith(), jumper = coil.players[0];
+  const item = ITEMS.find(entry => entry.id === 'jump-coil');
+  jumper.heldItem = { ...item };
+  stepWorld(coil, { 0: tap(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.equal(jumper.jumpBuff, item.duration);
+  assert.equal(jumper.jumpBuffMultiplier, item.multiplier);
+  assert.equal(jumper.actionName, 'itemCoil');
 });
 
 test('time mode scores and resolves a winner at timeout', () => {
@@ -766,6 +858,61 @@ test('long combos scale damage down to a 65 percent floor without dropping lower
   assert.ok(Math.abs(increments[6] / freshDamage - .65) < .001);
   assert.ok(Math.abs(increments[8] / freshDamage - .65) < .001);
   assert.equal(target.comboCount, 9);
+});
+
+test('repeated grounded flinch breaks into an escapable launch on the third hit', () => {
+  const world = worldWith(), attacker = world.players[0], target = world.players[1];
+  const platform = world.platforms[0];
+  const move = {
+    name: 'flinch-loop-test', damage: 3, fixedKx: 60, fixedKy: 0,
+    kx: 60, ky: 0, knockbackGrowth: .12, hitstop: 3,
+    hitstun: 12, groundedFlinch: true
+  };
+
+  for (let hit = 0; hit < 3; hit++) {
+    attacker.hitstop = 0;
+    target.x = 660; target.y = platform.y - target.height / 2;
+    target.vx = 0; target.vy = 0; target.grounded = true; target.platformId = platform.id;
+    target.hitstop = 0; target.stun = 0; target.invincible = 0; target.tumbling = false;
+    world.entities.push({
+      id: 300 + hit, type: 'projectile', owner: attacker.i, kind: move.name,
+      x: target.x, y: target.y, vx: 0, vy: 0, life: 5, radius: 24,
+      hitPlayers: [], ...move
+    });
+    stepWorld(world, { 0: frame(hit + 1), 1: frame(hit + 1) });
+    if (hit < 2) {
+      assert.equal(target.grounded, true);
+      assert.equal(target.tumbling, false);
+    }
+  }
+
+  assert.equal(target.comboCount, 3);
+  assert.equal(target.grounded, false);
+  assert.equal(target.tumbling, true);
+  assert.ok(Math.abs(target.vx) >= 145);
+  assert.ok(target.vy <= -120);
+});
+
+test('authored hitstun loosens after a long combo instead of remaining a frame trap', () => {
+  const world = worldWith(), attacker = world.players[0], target = world.players[1];
+  const platform = world.platforms[0], stuns = [];
+  for (let hit = 0; hit < 7; hit++) {
+    attacker.hitstop = 0;
+    target.x = 660; target.y = platform.y - target.height / 2;
+    target.vx = 0; target.vy = 0; target.grounded = true; target.platformId = platform.id;
+    target.hitstop = 0; target.stun = 0; target.invincible = 0; target.tumbling = false;
+    world.entities.push({
+      id: 400 + hit, type: 'projectile', owner: attacker.i, kind: `stun-loop-${hit}`,
+      x: target.x, y: target.y, vx: 0, vy: 0, damage: 2, kx: 1, ky: 1,
+      hitstun: 20, life: 5, radius: 24, hitPlayers: []
+    });
+    stepWorld(world, { 0: frame(hit + 1), 1: frame(hit + 1) });
+    stuns.push(target.stun);
+  }
+  assert.equal(stuns[0], 20);
+  assert.equal(stuns[2], 20);
+  assert.ok(stuns[4] < stuns[3]);
+  assert.ok(stuns[6] <= 15);
 });
 
 test('rage increases launch speed while DI rotates launch without adding speed', () => {
@@ -1186,21 +1333,35 @@ test('Blaze counter converts an incoming hit into a strong visible retaliation',
   const world = worldWith();
   const attacker = world.players[0], blaze = world.players[1];
   stepWorld(world, { 0: frame(1), 1: frame(1, BUTTONS.DOWN | BUTTONS.SPECIAL, 0, 1) });
-  stepWorld(world, { 0: frame(2), 1: frame(2) });
-  stepWorld(world, { 0: frame(3), 1: frame(3) });
-  stepWorld(world, { 0: tap(4, BUTTONS.ATTACK), 1: frame(4) });
-  stepWorld(world, { 0: frame(5), 1: frame(5) });
-  stepWorld(world, { 0: frame(6), 1: frame(6) });
-  stepWorld(world, { 0: frame(7), 1: frame(7) });
+  for (let seq = 2; seq <= 5; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  stepWorld(world, { 0: tap(6, BUTTONS.ATTACK), 1: frame(6) });
+  for (let seq = 7; seq <= 9; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
 
   assert.equal(blaze.damage, 0);
-  assert.ok(attacker.damage >= 14, `counter damage ${attacker.damage}`);
-  assert.ok(Math.hypot(attacker.vx, attacker.vy) >= 500, 'counter creates meaningful launch');
+  assert.ok(attacker.damage >= 10 && attacker.damage < 14, `counter damage ${attacker.damage}`);
+  assert.ok(Math.hypot(attacker.vx, attacker.vy) >= 400, 'counter creates meaningful but bounded launch');
   assert.equal(attacker.action, null);
   assert.ok(attacker.tumbling && attacker.stun > 0);
   assert.equal(blaze.action?.variant, 'counterSuccess');
   assert.ok(blaze.invincible > 0);
-  assert.ok(world.events.some(event => event.type === 'counter' && event.player === blaze.i && event.attacker === attacker.i));
+  assert.ok(world.events.some(event => event.type === 'counter' && event.player === blaze.i && event.attacker === attacker.i && event.connected));
+});
+
+test('Blaze counter negates a distant projectile without globally striking its owner', () => {
+  const world = worldWith(), shooter = world.players[0], blaze = world.players[1];
+  shooter.x = 220; blaze.x = 780;
+  stepWorld(world, { 0: frame(1), 1: frame(1, BUTTONS.DOWN | BUTTONS.SPECIAL, 0, 1) });
+  for (let seq = 2; seq <= 5; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  world.entities.push({
+    id: 900, type: 'projectile', owner: shooter.i, kind: 'counter-range-test',
+    x: blaze.x, y: blaze.y, vx: 0, vy: 0, damage: 12, kx: 300, ky: 140,
+    life: 5, radius: 30, hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(6), 1: frame(6) });
+  assert.equal(blaze.damage, 0);
+  assert.equal(shooter.damage, 0);
+  assert.equal(blaze.action?.variant, 'counterSuccess');
+  assert.ok(world.events.some(event => event.type === 'counter' && event.connected === false));
 });
 
 test('side special brakes during recovery instead of sliding after the move', () => {
@@ -1335,9 +1496,25 @@ test('sudden death ends on the first KO and training reset clears transient stat
   const training = worldWith({ mode: 'training' }), player = training.players[0];
   player.action = { name: 'groundSide', frame: 2, move: { startup: 3, active: 2, recovery: 9 } };
   player.stun = 30; player.dodgeFrames = 20; player.shielding = true; player.damage = 120; player.eliminated = true;
+  player.heldItem = { ...ITEMS[0] };
+  training.items.push({ id: 500, definition: ITEMS[0], x: 600, y: 490, vy: 0 });
+  training.entities.push({ id: 501, type: 'projectile', owner: 0, life: 30, x: 600, y: 400, vx: 0, vy: 0 });
   assert.equal(trainingCommand(training, { type: 'reset', damage: 35 }), true);
   assert.equal(player.action, null); assert.equal(player.stun, 0); assert.equal(player.dodgeFrames, 0); assert.equal(player.shielding, false); assert.equal(player.damage, 0); assert.equal(player.eliminated, false);
+  assert.equal(player.heldItem, null); assert.equal(training.items.length, 0); assert.equal(training.entities.length, 0);
   assert.equal(training.players[1].damage, 35);
+});
+
+test('training mode keeps an infinite clock while normal matches count down', () => {
+  const training = worldWith({ mode: 'training', timeSeconds: 420 });
+  const trainingTicks = training.remainingTicks;
+  stepWorld(training, { 0: frame(1), 1: frame(1) });
+  assert.equal(training.remainingTicks, trainingTicks);
+
+  const stock = worldWith({ mode: 'stock', timeSeconds: 420 });
+  const stockTicks = stock.remainingTicks;
+  stepWorld(stock, { 0: frame(1), 1: frame(1) });
+  assert.equal(stock.remainingTicks, stockTicks - 1);
 });
 
 test('an attack pressed during hitstop is buffered and side specials face the input direction', () => {
