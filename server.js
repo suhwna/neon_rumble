@@ -7,6 +7,7 @@ const { Server } = require('socket.io');
 const { FIGHTERS, STAGES, DEFAULT_RULES } = require('./content');
 const { TICK_RATE, normalizeRules, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer } = require('./engine');
 const { StatsStore } = require('./store');
+const GAME_VERSION = require('./version');
 
 const app = express();
 const server = http.createServer(app);
@@ -39,7 +40,11 @@ app.get('/healthz', (_req, res) => {
   const players = [...rooms.values()].reduce((sum, room) => sum + room.slots.length, 0);
   const sorted = [...recentTickCosts].sort((a, b) => a - b);
   const p95 = sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] || 0;
-  res.json({ ok: true, uptime: Math.floor((Date.now() - startedAt) / 1000), rooms: rooms.size, players, queued: queue.length, tickAvgMs: tickCostSamples ? +(tickCostTotal / tickCostSamples).toFixed(3) : 0, tickP95Ms: +p95.toFixed(3), tickMaxMs: +tickCostMax.toFixed(3) });
+  res.json({ ok: true, version: GAME_VERSION.version, protocol: GAME_VERSION.protocol, uptime: Math.floor((Date.now() - startedAt) / 1000), rooms: rooms.size, players, queued: queue.length, tickAvgMs: tickCostSamples ? +(tickCostTotal / tickCostSamples).toFixed(3) : 0, tickP95Ms: +p95.toFixed(3), tickMaxMs: +tickCostMax.toFixed(3) });
+});
+app.get('/version.json', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(GAME_VERSION);
 });
 app.use(express.static(__dirname));
 
@@ -336,7 +341,7 @@ io.on('connection', socket => {
     const name = nickname(payload?.nickname);
     socket.data.identity = { clientId, nickname: name, characterId: FIGHTERS.some(item => item.id === payload?.characterId) ? payload.characterId : 'volt', palette: Number(payload?.palette) || 0 };
     const stats = store.ensurePlayer(clientId, name);
-    reply?.({ ok: true, clientId, nickname: name, token: sign(clientId), stats });
+    reply?.({ ok: true, clientId, nickname: name, token: sign(clientId), stats, version: GAME_VERSION.version, protocol: GAME_VERSION.protocol });
   });
 
   socket.on('room:create', (payload, reply) => {
@@ -481,7 +486,7 @@ function clampNumber(value, min, max) { value = Number(value); return Number.isF
 function clampInt(value, min, max) { return Math.round(clampNumber(value, min, max)); }
 
 const port = Number(process.env.PORT || process.argv[2]) || 4173;
-server.listen(port, '0.0.0.0', () => console.log(`NEON RUMBLE running on http://localhost:${port}`));
+server.listen(port, '0.0.0.0', () => console.log(`NEON RUMBLE v${GAME_VERSION.version} (protocol ${GAME_VERSION.protocol}) running on http://localhost:${port}`));
 
 function shutdown() { try { store.close(); } finally { server.close(() => process.exit(0)); } }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

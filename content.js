@@ -86,7 +86,7 @@
         airDown: { startup: 9, active: 4, recovery: 16, landingLag: 11, damage: 11, kx: 75, ky: -355, motion: 'boltDive' },
         specialNeutral: { projectile: 'arc', projectileOnly: true, motion: 'cast', startup: 7, active: 2, recovery: 14, damage: 6.5, projectileSpeed: 625, projectileRadius: 22, chainRadius: 80, projectileCooldown: 42, maxActiveProjectiles: 2 },
         specialSide: { dash: 'pulse', motion: 'rush', startup: 6, active: 8, recovery: 17, dashSpeed: 560, recoveryDrag: 0.62, damage: 12, kx: 380 },
-        specialUp: { recoveryMove: true, recoveryKind: 'thunder', motion: 'rise', startup: 4, active: 8, recovery: 18, riseSpeed: 680, riseHorizontal: 235 },
+        specialUp: { recoveryMove: true, recoveryKind: 'thunder', causesFreefall: true, motion: 'rise', startup: 4, active: 8, recovery: 18, riseSpeed: 680, riseHorizontal: 235 },
         specialDown: { trap: null, trapOnly: false, radial: true, low: true, motion: 'discharge', startup: 8, active: 4, recovery: 20, damage: 6.5, kx: 105, ky: 80, reachX: 96, reachY: 48, knockbackGrowth: .25, groundedFlinch: true, hitstun: 20 }
       }),
     fighter('blaze', 'BLAZE', '#ff3b69', '◆', '중량급 파워',
@@ -104,8 +104,8 @@
         airUp: { startup: 10, active: 6, recovery: 20, landingLag: 13, damage: 14, kx: 165, ky: 440, reachY: 108, motion: 'launcher' },
         airDown: { startup: 15, active: 6, recovery: 28, landingLag: 18, damage: 19, kx: 110, ky: -510, reachX: 68, reachY: 98, motion: 'anvilDrop' },
         specialNeutral: { projectile: 'core', projectileOnly: true, motion: 'cannon', chargeable: true, startup: 14, active: 2, recovery: 24, damage: 14.5, kx: 405, projectileSpeed: 330, projectileRadius: 42, splashRadius: 80, projectileCooldown: 66, maxActiveProjectiles: 1 },
-        specialSide: { dash: 'armor', motion: 'shoulder', armor: true, armorThreshold: 9, startup: 11, active: 7, recovery: 26, dashSpeed: 450, recoveryDrag: 0.68, damage: 17, kx: 450 },
-        specialUp: { recoveryMove: true, recoveryKind: 'rocket', motion: 'rocket', startup: 7, active: 8, recovery: 24, riseSpeed: 625, riseHorizontal: 190, damage: 15, ky: 410 },
+        specialSide: { dash: 'armor', motion: 'shoulder', armor: true, armorType: 'heavy', armorThreshold: 9, startup: 11, active: 7, recovery: 26, dashSpeed: 450, recoveryDrag: 0.68, damage: 17, kx: 450 },
+        specialUp: { recoveryMove: true, recoveryKind: 'rocket', causesFreefall: true, motion: 'rocket', startup: 7, active: 8, recovery: 24, riseSpeed: 625, riseHorizontal: 190, damage: 15, ky: 410 },
         specialDown: {
           armor: true, counter: true, defensiveOnly: true, motion: 'counter',
           startup: 5, active: 8, recovery: 27,
@@ -115,7 +115,7 @@
         }
       }),
     fighter('bolt', 'BOLT', '#ffd23f', '●', '트릭과 지형 제어',
-      { speed: 1.06, air: 1.04, jump: 1.02, weight: 1.07, power: 1.02, width: 56, height: 68, skid: 12 }, {
+      { speed: 1.06, air: 1.04, jump: 1.02, weight: 1.07, power: 1.02, width: 56, height: 68, skid: 12, canCrawl: true }, {
         groundNeutral: { startup: 3, active: 3, recovery: 5, damage: 3.8, kx: 105, ky: 58, reachX: 61, motion: 'orbJab' },
         groundJab2: { startup: 3, active: 3, recovery: 6, damage: 4.2, kx: 125, ky: 70, reachX: 66, motion: 'orbJab' },
         groundJab3: { startup: 6, active: 5, recovery: 12, damage: 8, kx: 290, ky: 140, reachX: 78, radial: true, motion: 'wheelSpin' },
@@ -130,7 +130,7 @@
         airDown: { startup: 11, active: 7, recovery: 20, landingLag: 13, damage: 14, kx: 90, ky: -405, reachX: 64, motion: 'wheelDrop' },
         specialNeutral: { projectile: 'boomerang', projectileOnly: true, motion: 'throw', startup: 7, active: 2, recovery: 13, projectileSpeed: 500, projectileRadius: 32, projectileCooldown: 42, maxActiveProjectiles: 1 },
         specialSide: { dash: 'roll', motion: 'roll', radial: true, startup: 6, active: 12, recovery: 15, dashSpeed: 510, recoveryDrag: 0.76, reachX: 74, reachY: 58, damage: 13.5, kx: 445, knockbackGrowth: 1.12 },
-        specialUp: { recoveryMove: true, recoveryKind: 'spring', motion: 'spring', startup: 4, active: 6, recovery: 20, riseSpeed: 720, riseHorizontal: 200, damage: 8, ky: 270 },
+        specialUp: { recoveryMove: true, recoveryKind: 'spring', causesFreefall: false, motion: 'spring', startup: 4, active: 6, recovery: 20, riseSpeed: 720, riseHorizontal: 200, damage: 8, ky: 270 },
         specialDown: { trap: null, radial: true, low: true, motion: 'quake', reachX: 118, reachY: 56, startup: 8, active: 5, recovery: 17, damage: 15 }
       }),
     fighter('nova', 'NOVA', '#8b5cff', '✦', '공중 기동과 워프',
@@ -150,7 +150,7 @@
         specialNeutral: { projectile: 'star', projectileOnly: true, motion: 'cast', startup: 7, active: 2, recovery: 13, damage: 8, projectileSpeed: 430, projectileRadius: 27, projectileCooldown: 36, maxActiveProjectiles: 1 },
         specialSide: { dash: false, motion: 'blink', teleport: 125, teleportExitSpeed: 310, startup: 5, active: 4, recovery: 13, knockbackGrowth: 1.15 },
         specialUp: {
-          recoveryMove: false, recoveryKind: 'warp', motion: 'warp',
+          recoveryMove: false, recoveryKind: 'warp', causesFreefall: true, motion: 'warp',
           teleportY: 140, warpNeutralBonus: 15, teleportHorizontal: 190,
           recoveryExitSpeed: 310, riseSpeed: 465, recoveryDrift: true, recoveryDriftControl: 1.35, warpInvincible: 3,
           startup: 4, active: 5, recovery: 19, landingLag: 12,
@@ -191,7 +191,7 @@
     { id: 'pulse-hammer', name: 'PULSE HAMMER', color: '#ffca3a', kind: 'melee', damage: 22, uses: 2 },
     { id: 'rail-blaster', name: 'RAIL BLASTER', color: '#26d9ff', kind: 'blaster', damage: 8.5, uses: 5 },
     { id: 'gravity-mine', name: 'GRAVITY MINE', color: '#8b5cff', kind: 'mine', damage: 16, uses: 1 },
-    { id: 'shield-battery', name: 'SHIELD BATTERY', color: '#7ce8ff', kind: 'heal-shield', amount: 55, uses: 1 },
+    { id: 'shield-battery', name: 'SHIELD BATTERY', color: '#7ce8ff', kind: 'heal-shield', amount: 27.5, uses: 1 },
     { id: 'jump-coil', name: 'JUMP COIL', color: '#5dff8f', kind: 'jump', multiplier: 1.3, duration: 420, uses: 1 },
     { id: 'warp-bomb', name: 'WARP BOMB', color: '#ff4d9d', kind: 'bomb', damage: 18, uses: 1 }
   ];

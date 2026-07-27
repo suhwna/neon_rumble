@@ -30,11 +30,23 @@ const trainingTutorialToggle = document.querySelector('#training-tutorial-toggle
 const trainingFighterSelect = document.querySelector('#training-fighter-select');
 const trainingBotSelect = document.querySelector('#training-bot-select');
 const socket = io();
+const appVersionLabel = document.querySelector('#app-version');
 
-const WORLD_W = 1280, WORLD_H = 720;
+function showGameVersion(metadata) {
+  if (!appVersionLabel || !metadata?.version) return;
+  appVersionLabel.textContent = `v${metadata.version} · P${metadata.protocol || '?'}`;
+  appVersionLabel.title = `${metadata.channel || 'unknown'} 채널 · 네트워크 프로토콜 ${metadata.protocol || '?'}`;
+}
+
+fetch('/version.json', { cache: 'no-store' })
+  .then(response => response.ok ? response.json() : null)
+  .then(showGameVersion)
+  .catch(() => { if (appVersionLabel) appVersionLabel.textContent = 'VERSION 확인 불가'; });
+
+const WORLD_W = 1280, WORLD_H = 720, SHIELD_MAX = 50;
 let dpr = 1, viewScale = 1, viewOffsetX = 0, viewOffsetY = 0;
 let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], blastMarks = [];
-let ultimateCinematic = null;
+let ultimateCinematic = null, koCinematics = [];
 let state = 'menu', room = null, myIndex = -1, identity = null;
 let selectedCharacter = localStorage.getItem('neon_character') || 'volt';
 let selectedPalette = Number(localStorage.getItem('neon_palette') || 0);
@@ -105,7 +117,7 @@ const TUTORIAL_STEPS = [
   { id: 'tilt', category: '공격 기초', title: '틸트 공격', command: '방향 → Z', goal: '틸트 공격 발동', description: '방향을 먼저 누른 상태에서 Z를 누르세요.', tip: '빠르고 후딜이 짧아 콤보와 견제에 유리합니다.' },
   { id: 'smash', category: '공격 기초', title: '스매시 공격', command: 'Z 홀드', goal: '스매시 공격 발동', description: '지상에서 Z를 잠시 유지하면 방향에 맞는 스매시를 충전합니다. 키를 놓으면 공격합니다.', tip: 'X는 언제나 캐릭터 필살기이며, 방향 없이 Z를 홀드하면 앞 스매시가 나갑니다.' },
   { id: 'shield', category: '방어 기초', title: '실드', command: 'C 유지', goal: '실드 펼치기', description: 'C를 유지해 공격을 막는 실드를 펼치세요.', tip: '실드가 깨지면 긴 시간 무방비 상태가 됩니다.' },
-  { id: 'parry', category: '방어 기초', title: '패링', command: '공격 직전 C 탭', goal: '패링 성공', description: '상대 공격이 닿기 직전에 C를 누르세요. 처음 5프레임 동안 패링하며, 계속 누르면 일반 실드로 이어집니다.', tip: '성공하면 상대만 16프레임 정지해 강한 반격 기회를 얻습니다.' },
+  { id: 'parry', category: '방어 기초', title: '패링', command: 'C 유지 → 피격 직전 해제', goal: '패링 성공', description: 'C로 실드를 잠깐 유지한 뒤 상대 공격이 닿기 직전에 놓으세요. 해제 직후 5프레임이 패링 판정입니다.', tip: '성공하면 상대만 16프레임 정지해 강한 반격 기회를 얻습니다.' },
   { id: 'dodge', category: '방어 기초', title: '구르기 회피', command: '←/→ + C', goal: '지상 구르기 사용', description: '방향키와 C를 함께 눌러 상대를 통과하며 회피하세요.', tip: '회피를 반복하면 무적 시간은 줄고 후딜은 늘어납니다.' },
   { id: 'special', category: '캐릭터 기술', title: '필살기', command: 'X / 방향 + X', goal: '아무 필살기 사용', description: 'X와 방향키 조합으로 캐릭터 고유 기술을 사용하세요.', tip: '중립·옆·위·아래 필살기는 서로 역할이 다릅니다.' },
   { id: 'throw', category: '잡기', title: '잡기와 던지기', command: 'V → 방향', goal: '더미를 잡아 던지기', description: '더미 가까이에서 V로 잡은 뒤 방향키로 던지세요.', tip: '실드 중인 상대도 잡을 수 있습니다.' },
@@ -134,6 +146,10 @@ function beginTutorialStep(index) {
   tutorialState.advancing = false;
   tutorialState.lastButtons = readInput().buttons;
   tutorialState.startX = players.find(player => player.i === myIndex)?.x || 0;
+  const step = TUTORIAL_STEPS[tutorialState.index];
+  const tutorialCpu = step?.id === 'parry' ? 'easy' : 'dummy';
+  document.querySelector('#cpu-select').value = tutorialCpu;
+  socket.emit('training:command', { type: 'cpu', value: tutorialCpu });
   document.querySelector('#tutorial-command').style.background = '';
   renderTutorial();
 }
@@ -303,6 +319,7 @@ async function initializeIdentity() {
   const response = await emitAck('identity:init', { clientId: storedId, token: storedToken, nickname: name, characterId: selectedCharacter, palette: selectedPalette });
   if (!response?.ok) return setError('사용자 초기화에 실패했습니다.');
   identity = response; sessionStorage.setItem('neon_client_id', response.clientId); sessionStorage.setItem('neon_identity_token', response.token); localStorage.setItem('neon_nickname', response.nickname);
+  showGameVersion({ version: response.version, protocol: response.protocol, channel: response.version?.includes('-') ? 'beta' : 'stable' });
   localStorage.removeItem('neon_client_id'); localStorage.removeItem('neon_identity_token');
   updateStats(response.stats);
   const session = getSession();
@@ -689,10 +706,30 @@ function processEvents(events) {
       beep(72, .2, 'square');
     }
     if (event.type === 'ultimate-cancel' && ultimateCinematic?.player === event.player) ultimateCinematic.duration = Math.min(ultimateCinematic.duration, performance.now() - ultimateCinematic.started + 120);
-    if (event.type === 'ko') { screenShake = 18; cameraPunch = .11; beep(60, .2, 'sawtooth'); }
+    if (event.type === 'ko') {
+      screenShake = 18;
+      cameraPunch = .11;
+      beep(event.style === 'star' ? 420 : event.style === 'screen' ? 82 : 60, event.style === 'blast' ? .2 : .32, 'sawtooth');
+      if (event.style === 'star' || event.style === 'screen') {
+        koCinematics.push({
+          style: event.style,
+          characterId: event.characterId,
+          palette: event.palette || 0,
+          life: event.style === 'star' ? 1.75 : 1.45,
+          duration: event.style === 'star' ? 1.75 : 1.45
+        });
+        if (koCinematics.length > 4) koCinematics.shift();
+      }
+    }
     if (event.type === 'land') { screenShake = Math.max(screenShake, 1); beep(72, .025, 'sine'); }
-    if (event.type === 'tech') beep(720, .055, 'square');
-    if (event.type === 'knockdown') { screenShake = Math.max(screenShake, 3); beep(85, .04, 'sine'); }
+    if (event.type === 'tech') {
+      if (Number.isFinite(event.x) && Number.isFinite(event.y)) burst(event.x, event.y, '#55bfff', 10, 135, -Math.PI / 2, .8);
+      beep(720, .055, 'square');
+    }
+    if (event.type === 'knockdown') {
+      if (Number.isFinite(event.x) && Number.isFinite(event.y)) burst(event.x, event.y, event.techable === false ? '#ff4d5f' : '#55bfff', 12, 155, -Math.PI / 2, .9);
+      screenShake = Math.max(screenShake, 3); beep(85, .04, 'sine');
+    }
     if (event.type === 'chain') { screenShake = Math.max(screenShake, 4); beep(760, .045, 'square'); }
     if (event.type === 'projectile-clash') {
       if (Number.isFinite(event.x) && Number.isFinite(event.y)) {
@@ -704,6 +741,24 @@ function processEvents(events) {
       screenShake = Math.max(screenShake, event.winner == null ? 4 : 2.5);
       beep(event.winner == null ? 310 : 240, .055, 'square');
     }
+    if (event.type === 'footstool') {
+      const target = players.find(item => item.i === event.target);
+      const x = event.x ?? target?.x, y = event.y ?? target?.y;
+      if (Number.isFinite(x) && Number.isFinite(y)) burst(x, y, '#eaffff', 12, 170, -Math.PI / 2, .9);
+      beep(520, .045, 'square');
+    }
+    if (event.type === 'ledge-trump') {
+      const player = players.find(item => item.i === event.player);
+      const x = event.x ?? player?.x, y = event.y ?? player?.y;
+      if (Number.isFinite(x) && Number.isFinite(y)) burst(x, y, '#80efff', 10, 140, 0, .82);
+      beep(260, .04, 'square');
+    }
+    if (event.type === 'fast-fall') {
+      if (Number.isFinite(event.x) && Number.isFinite(event.y)) {
+        burst(event.x, event.y, '#ffffff', 8, 105, -Math.PI / 2, .72);
+      }
+      beep(680, .025, 'sine');
+    }
     if (event.type === 'explosion') {
       screenShake = Math.max(screenShake, 11); cameraPunch = Math.max(cameraPunch, .07);
       if (Number.isFinite(event.x) && Number.isFinite(event.y) && Number.isFinite(event.radius)) blastMarks.push({ x:event.x, y:event.y, radius:event.radius, color:event.color || '#ffcf6b', life:.2, duration:.2 });
@@ -713,7 +768,7 @@ function processEvents(events) {
 }
 
 function copyState(target, source) {
-  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeGrabs','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','ultimateMeter','stun','hitstop','landingLag','tumbling','tumbleRecoverFrames','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','dashFrames','jumpSquatFrames','eliminated','respawn','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
+  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','shieldOffsetX','shieldOffsetY','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeGrabs','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionAngleShift','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','ultimateMeter','stun','dizzyFrames','footstoolCooldown','fastFalling','fastFallFlashFrames','horizontalHoldFrames','landingLag','tumbling','tumbleRecoverFrames','freefall','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','dashFrames','jumpSquatFrames','eliminated','respawn','respawnPlatformFrames','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
 }
 function lerp(a, b, amount) { return a + (b - a) * amount; }
 function actionPhaseFrames(player, phase = player.actionPhase, actionName = player.actionName) {
@@ -828,7 +883,7 @@ function draw(dt) {
   ctx.translate(WORLD_W / 2 + shakeX, WORLD_H / 2 + shakeY);
   ctx.scale(camera.zoom + cameraPunch, camera.zoom + cameraPunch);
   ctx.translate(-camera.x, -camera.y);
-  drawBackground(); drawBlastZone(); drawPlatforms(); drawEntities();
+  drawBackground(); drawBlastZone(); drawPlatforms(); drawEntities(); drawRespawnPlatforms();
   drawTrails();
   for (const player of players) drawPlayer(player, dt);
   drawBlastMarks();
@@ -836,6 +891,7 @@ function draw(dt) {
   drawImpactRings();
   ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,viewOffsetX*dpr,viewOffsetY*dpr);
   drawCameraIndicators();
+  drawKoCinematics();
   if (criticalFlash > 0) {
     ctx.save();
     ctx.globalAlpha = criticalFlash * .14;
@@ -1418,11 +1474,21 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
   if (action === 'idle') return sampleKeyframes(LOOP_KEYFRAMES.idle, (age / 1.4) % 1);
   if (action === 'jumpSquat') return sampleKeyframes(ONESHOT_KEYFRAMES.jumpSquat, clamp(age / .09, 0, 1));
   if (action === 'jump') return sampleKeyframes(ONESHOT_KEYFRAMES.jump, clamp(age / .24, 0, 1));
-  if (action === 'fall') return sampleKeyframes(ONESHOT_KEYFRAMES.fall, (age / .8) % 1);
+  if (action === 'fall' || action === 'freefall') return sampleKeyframes(ONESHOT_KEYFRAMES.fall, (age / .8) % 1);
   if (action === 'landing') return sampleKeyframes(ONESHOT_KEYFRAMES.landing, clamp(age / .2, 0, 1));
   if (action === 'groundHit') return sampleKeyframes(ONESHOT_KEYFRAMES.groundHit, clamp(age / .24, 0, 1));
   if (action === 'hit' || action === 'airRecover') return sampleKeyframes(ONESHOT_KEYFRAMES.hit, clamp(age / .28, 0, 1));
   if (action === 'tumble') return sampleKeyframes(LOOP_KEYFRAMES.tumble, (age / .42) % 1);
+  if (action === 'crawl') {
+    const pose = sampleKeyframes(ONESHOT_KEYFRAMES.crouch, 1);
+    const stride = Math.sin(age / .34 * Math.PI * 2);
+    pose.bodyX = stride * 1.5;
+    pose.frontHandX += stride * 7;
+    pose.backHandX += stride * 6;
+    pose.frontFootX -= stride * 8;
+    pose.backFootX -= stride * 7;
+    return pose;
+  }
   if (action === 'crouch') return sampleKeyframes(ONESHOT_KEYFRAMES.crouch, clamp(age / .12, 0, 1));
   if (action === 'spotDodge') return sampleKeyframes(ONESHOT_KEYFRAMES.spotDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 24), 0, 1));
   if (action === 'airDodge') return sampleKeyframes(ONESHOT_KEYFRAMES.airDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 44), 0, 1));
@@ -1754,7 +1820,7 @@ function drawPlayer(p, dt) {
   if (attack && !side && !up && !down) { rotation = p.face * -.07 * strike; bodyX = p.face * 5 * strike; scaleX += .06 * Math.max(0,strike); }
   if (action === 'run' || action === 'dash' || action === 'dashAttack') rotation = p.face * .07;
   if (action === 'walk') rotation = p.face * .025;
-  if (action === 'crouch') { scaleX = 1.16; scaleY = .72; bodyY = 10; }
+  if (action === 'crouch' || action === 'crawl') { scaleX = 1.16; scaleY = .72; bodyY = 10; }
   if (action === 'jump') { scaleX = .9; scaleY = 1.08; }
   if (action === 'jumpSquat') { scaleX = 1.24; scaleY = .72; bodyY = 9; }
   if (action === 'fall') { scaleX = 1.08; scaleY = .94; }
@@ -1889,6 +1955,7 @@ function drawPlayer(p, dt) {
   ({scaleX,scaleY,rotation,bodyX,bodyY}=pose);
 
   ctx.save(); ctx.translate(p.x, p.y);
+  if (p.freefall) ctx.filter = 'brightness(.52) saturate(.72)';
   if (action === 'dash' || action === 'dashAttack' || action === 'specialSide') {
     ctx.strokeStyle = color; ctx.lineCap = 'round';
     for (let i = 1; i <= 4; i++) { const offset=-p.face*i*17;ctx.globalAlpha=.16/i*2;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(offset,-p.height*.34);ctx.lineTo(offset,p.height*.28);ctx.stroke(); }
@@ -1899,8 +1966,13 @@ function drawPlayer(p, dt) {
     ctx.beginPath();ctx.arc(0,0,p.width*.55+recoverAge*16,-Math.PI*.85,Math.PI*.7);ctx.stroke();ctx.restore();
   }
   ctx.globalAlpha = p.invincible > 0 && Math.floor(p.invincible / 3) % 2 ? .42 : 1;
+  if (p.invincible > 0) {
+    ctx.shadowBlur = 13;
+    ctx.shadowColor = '#ffffff';
+  }
   if (p.shielding) {
-    const shieldScale = .58 + .42 * clamp((p.shield || 0) / 100, 0, 1);
+    ctx.save();ctx.translate(p.shieldOffsetX||0,p.shieldOffsetY||0);
+    const shieldScale = .58 + .42 * clamp((p.shield || 0) / SHIELD_MAX, 0, 1);
     const shieldRadius = Math.max(p.width * .9 + 15, p.height * .75 + 12) * shieldScale;
     const shieldHit = action === 'shieldHit';
     ctx.fillStyle = shieldHit ? 'rgba(255,174,82,.34)' : 'rgba(100,224,255,.3)'; ctx.strokeStyle = shieldHit ? '#fff0a8' : p.parryFrames > 0 ? '#fff36b' : '#d9fbff'; ctx.lineWidth = shieldHit ? 6 : p.parryFrames > 0 ? 5 : 4;
@@ -1910,13 +1982,13 @@ function drawPlayer(p, dt) {
     ctx.globalAlpha*=.65;ctx.lineWidth=2;ctx.beginPath();
     ctx.arc(p.face * shieldRadius * .16, 0, shieldRadius * .62, -Math.PI * .68, Math.PI * .68);
     ctx.stroke();
-    if ((p.shield || 100) < 42) {
+    if ((p.shield ?? SHIELD_MAX) < SHIELD_MAX * .42) {
       const crack = shieldRadius * .46;
       ctx.globalAlpha=.82;ctx.strokeStyle='#ffcf78';ctx.beginPath();
       ctx.moveTo(-crack*.18,-crack);ctx.lineTo(crack*.06,-crack*.42);ctx.lineTo(-crack*.14,-crack*.05);
       ctx.lineTo(crack*.16,crack*.34);ctx.lineTo(crack*.05,crack*.82);ctx.stroke();
     }
-    ctx.globalAlpha=1;
+    ctx.globalAlpha=1;ctx.restore();
   }
   if (p.parryFrames > 0 && !p.shielding) {
     ctx.strokeStyle = '#fff36b'; ctx.lineWidth = 5; ctx.globalAlpha *= .45 + p.parryFrames * .12;
@@ -2142,7 +2214,7 @@ function drawPlayer(p, dt) {
   }
   ctx.fillStyle='rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8;ctx.fill();ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=4;ctx.stroke();
-  ctx.strokeStyle='#f7fbff';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();
+  ctx.strokeStyle=action==='parrySuccess'?'#fff36b':'#f7fbff';ctx.shadowBlur=action==='parrySuccess'?12:0;ctx.shadowColor='#fff36b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();ctx.shadowBlur=0;
   if (attack && phase === 'active' && p.actionHitbox) {
     const handX = legStrike ? action === 'airBack' ? backFootX : frontFootX : frontX, handY = legStrike ? action === 'airBack' ? backFootY : frontFootY : frontY + bodyCenterY;
     ctx.shadowBlur = 7; ctx.shadowColor = color; ctx.fillStyle = '#ffffff';
@@ -2199,7 +2271,7 @@ function drawBattleHUD(){
     const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];
     const color=fighter.palettes[p.palette%fighter.palettes.length];
     const x=startX+index*(cardW+gap),damage=Math.max(0,Math.round(p.damage)),danger=clamp(p.damage/160,0,1);
-    const shield=clamp((p.shield||0)/100,0,1),ultimate=clamp((p.ultimateMeter||0)/100,0,1);
+    const shield=clamp((p.shield||0)/SHIELD_MAX,0,1),ultimate=clamp((p.ultimateMeter||0)/100,0,1);
     const damageColor=danger<.48?'#ffffff':danger<.82?'#ffd35d':'#ff496f';
     const barX=x+166,barW=Math.max(72,cardW-178);
     ctx.save();
@@ -2265,12 +2337,37 @@ function drawBattleHUD(){
 }
 function drawOffscreen(){for(const p of players){if(p.eliminated||p.respawn>0||p.x>=0&&p.x<=WORLD_W&&p.y>=0&&p.y<=WORLD_H)continue;const x=clamp(p.x,25,WORLD_W-25),y=clamp(p.y,25,WORLD_H-110),fighter=FIGHTERS.find(item=>item.id===p.characterId);ctx.fillStyle=fighter.color;ctx.beginPath();ctx.arc(x,y,14,0,Math.PI*2);ctx.fill();ctx.fillStyle='#080a12';ctx.font='900 9px Inter';ctx.textAlign='center';ctx.fillText(playerTag(p),x,y+3);}}
 function drawCameraIndicators(){const zoom=camera.zoom+cameraPunch;for(const p of players){if(p.eliminated||p.respawn>0)continue;const sx=(p.x-camera.x)*zoom+WORLD_W/2,sy=(p.y-camera.y)*zoom+WORLD_H/2;if(sx>25&&sx<WORLD_W-25&&sy>25&&sy<WORLD_H-112)continue;const x=clamp(sx,28,WORLD_W-28),y=clamp(sy,28,WORLD_H-116),fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0],color=fighter.palettes[p.palette%fighter.palettes.length];ctx.save();ctx.shadowBlur=14;ctx.shadowColor=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y-16);ctx.lineTo(x+15,y+12);ctx.lineTo(x-15,y+12);ctx.closePath();ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#080a12';ctx.font='900 9px Inter';ctx.textAlign='center';ctx.fillText(playerTag(p),x,y+6);ctx.restore();}}
+function drawRespawnPlatforms(){
+  for(const p of players){
+    if(!p.respawnPlatformFrames)continue;
+    const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0],color=fighter.palettes[p.palette%fighter.palettes.length];
+    const fade=clamp(p.respawnPlatformFrames/18,0,1),y=p.y+p.height/2+9;
+    ctx.save();ctx.globalAlpha=.38+.5*fade;ctx.shadowColor=color;ctx.shadowBlur=20;ctx.fillStyle='rgba(225,250,255,.2)';ctx.strokeStyle=color;ctx.lineWidth=3;
+    ctx.beginPath();ctx.ellipse(p.x,y,54,10,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+    ctx.globalAlpha*=.42;ctx.beginPath();ctx.ellipse(p.x,y+4,39,5,0,0,Math.PI*2);ctx.stroke();ctx.restore();
+  }
+}
+function drawKoCinematics(){
+  for(const effect of koCinematics){
+    const progress=1-clamp(effect.life/effect.duration,0,1),fighter=FIGHTERS.find(item=>item.id===effect.characterId)||FIGHTERS[0],color=fighter.palettes[effect.palette%fighter.palettes.length];
+    ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 26px Inter';ctx.shadowColor=color;ctx.shadowBlur=18;
+    if(effect.style==='star'){
+      const x=WORLD_W*.5+Math.sin(progress*Math.PI*5)*72*(1-progress),y=WORLD_H*.43-progress*WORLD_H*.54,scale=lerp(1.25,.16,progress);
+      ctx.translate(x,y);ctx.rotate(progress*Math.PI*4);ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillText(fighter.icon,0,0);
+      ctx.strokeStyle=color;ctx.lineWidth=3;ctx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,r=i%2?13:28;i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.stroke();
+    }else{
+      const scale=lerp(.18,4.2,Math.pow(progress,1.65)),alpha=clamp(1-Math.max(0,progress-.72)/.28,0,1);
+      ctx.globalAlpha=alpha;ctx.translate(WORLD_W/2,WORLD_H*.43);ctx.rotate(Math.sin(progress*Math.PI)*-.18);ctx.scale(scale,scale);ctx.fillStyle=color;ctx.fillText(fighter.icon,0,0);
+    }
+    ctx.restore();
+  }
+}
 function burst(x,y,color,count,speed,direction=0,scale=1){for(let i=0;i<count;i++){const forward=i<count*.66,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?1.8:2.55),s=speed*(.3+Math.random()*.82),duration=.19+Math.random()*.15;particles.push({x:x+(Math.random()-.5)*7,y:y+(Math.random()-.5)*7,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%4===0?color:'#ffffff',size:(1.8+Math.random()*2.5)*scale,gravity:42+Math.random()*65});}if(particles.length>96)particles.splice(0,particles.length-96);}
 function drawParticles(){ctx.save();for(const p of particles){const fade=clamp(p.life/p.duration,0,1),size=Math.max(1.6,p.size*(.48+fade*.52));ctx.globalAlpha=Math.min(1,fade*fade*1.12);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(Math.round(p.x),Math.round(p.y),size*.52,0,Math.PI*2);ctx.fill();}ctx.restore();}
 function drawBlastMarks(){for(const mark of blastMarks){const fade=clamp(mark.life/mark.duration,0,1),expand=.72+(1-fade)*.28;ctx.save();ctx.translate(mark.x,mark.y);ctx.globalAlpha=fade*.28;ctx.fillStyle=mark.color;ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.shadowColor=mark.color;ctx.shadowBlur=10;ctx.beginPath();for(let i=0;i<16;i++){const a=-Math.PI/2+i*Math.PI/8,r=mark.radius*expand*(i%2?.84:1);i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fill();ctx.globalAlpha=fade*.8;ctx.stroke();ctx.restore();}}
 function drawImpactRings(){for(const ring of impactRings){const fade=clamp(ring.life/ring.duration,0,1),burst=1-fade,radius=ring.radius*(.62+burst*.9);ctx.save();ctx.translate(ring.x,ring.y);ctx.globalAlpha=fade*.8;ctx.strokeStyle=ring.color;ctx.lineWidth=2.5+fade*4;ctx.shadowBlur=10;ctx.shadowColor=ring.color;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.stroke();ctx.globalAlpha*=.45;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,radius*.58,0,Math.PI*2);ctx.stroke();ctx.restore();}}
 function drawTrails(){for(const trail of trails){if(!trail.launch)continue;ctx.save();ctx.translate(trail.x,trail.y);const speed=Math.hypot(trail.vx,trail.vy),length=clamp(speed*(trail.finisher?.19:.14),58,trail.finisher?178:132);ctx.rotate(Math.atan2(trail.vy,trail.vx));const gradient=ctx.createLinearGradient(-length,0,4,0);gradient.addColorStop(0,'rgba(255,255,255,0)');gradient.addColorStop(trail.finisher?.55:.72,trail.color);gradient.addColorStop(1,'rgba(255,255,255,.9)');ctx.globalAlpha=trail.life*(trail.finisher?2.8:2.25);ctx.strokeStyle=gradient;ctx.lineWidth=clamp(speed/(trail.finisher?125:155),trail.finisher?5:3,trail.finisher?9:6);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-length,0);ctx.lineTo(4,0);ctx.stroke();if(trail.finisher){ctx.globalAlpha*=.75;ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-length*.72,0);ctx.lineTo(5,0);ctx.stroke();}ctx.restore();}}
-function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
+function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
 
 function loop(now){requestAnimationFrame(loop);const dt=Math.min(.033,(now-lastFrame)/1000);lastFrame=now;updateParticles(dt);if(state==='playing'||state==='waiting'){sendInput(now);renderNetworkState(dt,now);if(state==='playing')updateTutorialState();}draw(dt);}
 requestAnimationFrame(loop);

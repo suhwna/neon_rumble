@@ -9,7 +9,13 @@ const BLAST_BOTTOM = WORLD_H + 260;
 const ACTION_BUFFER_FRAMES = 10;
 const JUMP_BUFFER_FRAMES = 10;
 const SMASH_HOLD_FRAMES = 10;
+const SMASH_MAX_HOLD_FRAMES = 90;
+const SMASH_MAX_DAMAGE_SCALE = 1.4;
+const SPECIAL_TURNAROUND_FRAMES = 4;
 const PARRY_FRAMES = 5;
+const SHIELD_MAX = 50;
+const REGRAB_LOCK_FRAMES = 60;
+const TECH_MAX_IMPACT_SPEED = 620;
 const ULTIMATE_READY = 100;
 const ULTIMATE_MOVES = Object.freeze({
   volt: {
@@ -68,23 +74,27 @@ function createPlayer(entry, index, count, rules) {
     palette: entry.palette ?? index, team: rules.teams ? (entry.team ?? index % 2) : index,
     x, y: 300, vx: 0, vy: 0, face: index < count / 2 ? 1 : -1,
     width: character.width, height: character.height,
-    grounded: false, platformId: null, jumps: 2, fastFalling: false,
+    grounded: false, platformId: null, jumps: 2, fastFalling: false, fastFallFlashFrames: 0,
     damage: rules.mode === 'training' ? Number(entry.damage || 0) : 0,
     stocks: rules.mode === 'time' ? 0 : rules.stocks, score: 0, kos: 0, falls: 0,
-    shield: 100, shielding: false, parryFrames: 0, shieldLock: 0, shieldStun: 0, shieldDropLag: 0,
+    shield: SHIELD_MAX, shielding: false, parryFrames: 0, shieldLock: 0, shieldStun: 0, shieldDropLag: 0,
+    shieldHoldFrames: 0, shieldReleaseQueued: false, shieldOffsetX: 0, shieldOffsetY: 0,
     action: null, actionName: 'idle', stun: 0, hitstop: 0, invincible: 90, dodgeFrames: 0,
     dodgeTotalFrames: 0, dodgeElapsed: 0, dodgeStartVx: 0, dodgeStartVy: 0, dodgeInitialVx: 0, dodgeInitialVy: 0, dodgeWindupFrames: 0, dodgeNeutral: false,
-    airDodgeAvailable: true, recoveryAvailable: true, ledge: null, ledgeInvincible: 0, canLedgeInvincible: true, ledgeGrabs: 0,
-    grabbedBy: null, grabbing: null, grabFrames: 0, grabEscape: 0, grabPummelCooldown: 0, pendingThrow: null,
+    airDodgeAvailable: true, recoveryAvailable: true, ledge: null, ledgeInvincible: 0, ledgeCatchFrames: 0, canLedgeInvincible: true, ledgeGrabs: 0,
+    grabbedBy: null, grabbing: null, grabFrames: 0, grabEscape: 0, grabPummelCooldown: 0, grabImmunity: 0, pendingThrow: null,
     comboCount: 0, comboTimer: 0, comboAttacker: null, lastDamager: null, staleQueue: [], jabStep: 0, jabTimer: 0,
     charge: null, heldItem: null, jumpBuff: 0, jumpBuffMultiplier: 1, projectileCooldown: 0, projectileCooldownMax: 0,
     ultimateMeter: rules.mode === 'training' ? ULTIMATE_READY : 0,
-    respawn: 0, eliminated: false, disconnected: false,
+    respawn: 0, respawnPlatformFrames: 0, eliminated: false, disconnected: false,
     lastInput: { buttons: 0, horizontal: 0, vertical: 0, seq: 0 },
     ackSeq: 0, lastTapLeft: -999, lastTapRight: -999,
-    landingLag: 0, pendingLandingLag: 0, skidFrames: 0, dashFrames: 0, hitId: 0, doubleJumpSerial: 0,
+    specialFlickDirection: 0, specialFlickFrames: 0, specialFlickFacing: 0,
+    landingLag: 0, pendingLandingLag: 0, skidFrames: 0, dashFrames: 0, horizontalHoldFrames: 0, horizontalHoldDirection: 0, hitId: 0, doubleJumpSerial: 0,
     coyoteFrames: 0, jumpBuffer: 0, actionBuffer: null,
-    tumbling: false, tumbleRecoverFrames: 0, techWindow: 0, knockdownFrames: 0, launchDecay: 0, criticalFlightFrames: 0, sdiCooldown: 0, canSdi: false, lastSdiHorizontal: 0, lastSdiVertical: 0,
+    tumbling: false, tumbleRecoverFrames: 0, freefall: false, techWindow: 0, knockdownFrames: 0, launchDecay: 0, criticalFlightFrames: 0, sdiCooldown: 0, canSdi: false, lastSdiHorizontal: 0, lastSdiVertical: 0,
+    dizzyFrames: 0, lastMashButtons: 0, lastMashHorizontal: 0, lastMashVertical: 0,
+    footstoolCooldown: 0, footstoolCount: 0, offscreenDamageClock: 0,
     dodgeFatigue: 0, dodgeFatigueCooldown: 0, shortHopFrames: 0, jumpSquatFrames: 0, jumpSquatShort: false, jumpSquatAttack: null, shieldBuffer: 0,
     dropThroughFrames: 0
   };
@@ -106,7 +116,8 @@ function createWorld(options = {}) {
     nextItemTick: 720 + Math.floor((options.seed || 7) % 480),
     events: [], eventId: 1, winner: null, suddenDeath: false,
     rng: makeRng(options.seed), cpuBrains: new Map(),
-    training: { paused: false, showHitboxes: false, cpu: options.cpu || 'dummy' }
+    training: { paused: false, showHitboxes: false, cpu: options.cpu || 'dummy' },
+    oneOnOneDamage: roster.length === 2 && !rules.items && !rules.teams && rules.mode !== 'training'
   };
 }
 
@@ -127,11 +138,15 @@ function isOutOfBounds(player) { return player.x < -BLAST_MARGIN_X || player.x >
 function releaseGrab(world, player) {
   if (player.grabbing != null) {
     const held = world.players.find(other => other.i === player.grabbing);
-    if (held) held.grabbedBy = null;
+    if (held) {
+      held.grabbedBy = null;
+      held.grabImmunity = Math.max(held.grabImmunity || 0, REGRAB_LOCK_FRAMES);
+    }
   }
   if (player.grabbedBy != null) {
     const holder = world.players.find(other => other.i === player.grabbedBy);
     if (holder) { holder.grabbing = null; holder.grabFrames = 0; holder.grabEscape = 0; holder.grabPummelCooldown = 0; holder.pendingThrow = null; }
+    player.grabImmunity = Math.max(player.grabImmunity || 0, REGRAB_LOCK_FRAMES);
   }
   player.grabbing = null; player.grabbedBy = null; player.grabFrames = 0; player.grabEscape = 0; player.grabPummelCooldown = 0; player.pendingThrow = null;
 }
@@ -148,16 +163,18 @@ function resetPlayerState(world, player, options = {}) {
   releaseGrab(world, player);
   player.x = options.x ?? 640; player.y = options.y ?? 220; player.vx = 0; player.vy = 0;
   player.damage = options.damage ?? 0; player.grounded = false; player.platformId = null;
-  player.jumps = 2; player.fastFalling = false; player.airDodgeAvailable = true; player.recoveryAvailable = true;
+  player.jumps = 2; player.fastFalling = false; player.fastFallFlashFrames = 0; player.airDodgeAvailable = true; player.recoveryAvailable = true;
   player.action = null; player.actionName = 'fall'; player.actionBuffer = null; player.charge = null;
   player.stun = 0; player.hitstop = 0; player.dodgeFrames = 0; player.dodgeTotalFrames = 0; player.dodgeElapsed = 0; player.dodgeStartVx = 0; player.dodgeStartVy = 0; player.dodgeInitialVx = 0; player.dodgeInitialVy = 0; player.dodgeWindupFrames = 0; player.dodgeNeutral = false; player.landingLag = 0; player.pendingLandingLag = 0;
-  player.shielding = false; player.parryFrames = 0; player.shieldStun = 0; player.shieldDropLag = 0; player.skidFrames = 0; player.dashFrames = 0; player.ledge = null; player.ledgeInvincible = 0; player.ledgeGrabs = 0; player.canLedgeInvincible = true;
+  player.shielding = false; player.parryFrames = 0; player.shieldStun = 0; player.shieldDropLag = 0; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false; player.shieldOffsetX = 0; player.shieldOffsetY = 0; player.skidFrames = 0; player.dashFrames = 0; player.horizontalHoldFrames = 0; player.horizontalHoldDirection = 0; player.ledge = null; player.ledgeInvincible = 0; player.ledgeCatchFrames = 0; player.ledgeGrabs = 0; player.canLedgeInvincible = true;
   player.coyoteFrames = 0; player.jumpBuffer = 0; player.comboCount = 0; player.comboTimer = 0; player.comboAttacker = null; player.staleQueue = []; player.jabStep = 0; player.jabTimer = 0; player.lastDamager = null;
-  player.tumbling = false; player.tumbleRecoverFrames = 0; player.techWindow = 0; player.knockdownFrames = 0; player.launchDecay = 0; player.criticalFlightFrames = 0; player.sdiCooldown = 0; player.canSdi = false; player.lastSdiHorizontal = 0; player.lastSdiVertical = 0;
+  player.tumbling = false; player.tumbleRecoverFrames = 0; player.freefall = false; player.techWindow = 0; player.knockdownFrames = 0; player.launchDecay = 0; player.criticalFlightFrames = 0; player.sdiCooldown = 0; player.canSdi = false; player.lastSdiHorizontal = 0; player.lastSdiVertical = 0;
   player.dodgeFatigue = 0; player.dodgeFatigueCooldown = 0; player.shortHopFrames = 0; player.jumpSquatFrames = 0; player.jumpSquatShort = false; player.jumpSquatAttack = null; player.shieldBuffer = 0; player.dropThroughFrames = 0; player.doubleJumpSerial = 0;
-  player.grabEscape = 0; player.grabPummelCooldown = 0; player.pendingThrow = null;
+  player.dizzyFrames = 0; player.lastMashButtons = 0; player.lastMashHorizontal = 0; player.lastMashVertical = 0; player.footstoolCooldown = 0; player.footstoolCount = 0; player.offscreenDamageClock = 0;
+  player.specialFlickDirection = 0; player.specialFlickFrames = 0; player.specialFlickFacing = 0;
+  player.grabEscape = 0; player.grabPummelCooldown = 0; player.grabImmunity = 0; player.pendingThrow = null;
   player.projectileCooldown = 0; player.projectileCooldownMax = 0; player.jumpBuff = 0; player.jumpBuffMultiplier = 1;
-  player.invincible = options.invincible ?? 0; player.eliminated = false; player.disconnected = false;
+  player.invincible = options.invincible ?? 0; player.respawnPlatformFrames = 0; player.eliminated = false; player.disconnected = false;
 }
 
 function moveName(player, input, special) {
@@ -166,7 +183,7 @@ function moveName(player, input, special) {
   const side = Math.abs(input.horizontal) > 0.35;
   if (special) return up ? 'specialUp' : down ? 'specialDown' : side ? 'specialSide' : 'specialNeutral';
   if (!player.grounded) return up ? 'airUp' : down ? 'airDown' : side ? Math.sign(input.horizontal) === player.face ? 'airForward' : 'airBack' : 'airNeutral';
-  return up ? 'groundUp' : down ? 'groundDown' : side ? player.dashFrames > 0 || Math.abs(player.vx) > 340 ? 'dashAttack' : 'groundSide' : 'groundNeutral';
+  return side ? player.dashFrames > 0 || Math.abs(player.vx) > 340 ? 'dashAttack' : 'groundSide' : up ? 'groundUp' : down ? 'groundDown' : 'groundNeutral';
 }
 
 function bufferActionInput(player, input, previous) {
@@ -262,6 +279,44 @@ function processJumpSquat(world, player, input, previous) {
   }
 }
 
+function freshHorizontalDirection(input, previous) {
+  if (input.horizontal < -.75 && previous.horizontal >= -.35) return -1;
+  if (input.horizontal > .75 && previous.horizontal <= .35) return 1;
+  return 0;
+}
+
+function tryFootstool(world, player) {
+  if (player.grounded || player.ledge || player.footstoolCooldown > 0) return false;
+  const feetY = player.y + player.height / 2;
+  const target = world.players
+    .filter(other => other.i !== player.i && !other.eliminated && other.respawn <= 0 && other.grabbedBy == null
+      && (world.rules.friendlyFire || !world.rules.teams || other.team !== player.team)
+      && Math.abs(other.x - player.x) <= (player.width + other.width) * .34
+      && feetY >= other.y - other.height / 2 - 12
+      && feetY <= other.y - other.height / 2 + 30)
+    .sort((first, second) => Math.abs(first.x - player.x) - Math.abs(second.x - player.x))[0];
+  if (!target) return false;
+  const reboundScale = Math.max(.55, 1 - (player.footstoolCount || 0) * .18);
+  player.vy = -620 * characterOf(player).jump * reboundScale;
+  player.jumpBuffer = 0; player.fastFalling = false; player.actionName = 'footstool';
+  player.footstoolCooldown = 18; player.footstoolCount = Math.min(4, (player.footstoolCount || 0) + 1);
+  target.lastDamager = player.i;
+  if (!target.ledge && !target.action) {
+    target.actionBuffer = null;
+    if (target.grounded) {
+      target.stun = Math.max(target.stun, 12);
+      target.actionName = 'footstooled';
+    } else {
+      target.vy = Math.max(target.vy, 210);
+      target.stun = Math.max(target.stun, 18);
+      target.tumbling = true;
+      target.actionName = 'tumble';
+    }
+  }
+  emit(world, 'footstool', { player: player.i, target: target.i, x: target.x, y: target.y - target.height / 2 });
+  return true;
+}
+
 function startMove(world, player, name, chargeScale = 1, options = {}) {
   const source = characterOf(player).moves[name];
   if (!source) return;
@@ -286,11 +341,23 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
     damage: source.damage * .72,
     kx: source.kx * .7,
     ky: source.ky * .76,
+    reachX: source.reachX * .9,
+    reachY: source.reachY * .92,
     chargeable: false,
     tilt: true
   } : source;
   const knockbackScale = 1 + Math.max(0, chargeScale - 1) * 0.625;
-  const move = { ...definition, name, damage: definition.damage * chargeScale, kx: definition.kx * knockbackScale, ky: definition.ky * knockbackScale };
+  const angleShift = name === 'groundSide' ? clamp(Number(options.input?.vertical) || 0, -1, 1) : 0;
+  const angleKyScale = angleShift < -.45 ? 1.24 : angleShift > .45 ? .58 : 1;
+  const move = {
+    ...definition,
+    name,
+    damage: definition.damage * chargeScale,
+    kx: definition.kx * knockbackScale,
+    ky: definition.ky * knockbackScale * angleKyScale,
+    angleShift,
+    hitboxShiftY: angleShift * Math.min(18, definition.reachY * .24)
+  };
   const beginCharged = !!options.beginCharged && !!move.chargeable;
   player.action = {
     name, move, variant: tilt ? 'tilt' : variant === 'smash' ? 'smash' : 'normal',
@@ -301,12 +368,14 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
     charged: chargeScale > 1,
     chargeButton: options.chargeButton,
     activated: false, startup: move.startup,
+    startedAirborne: !player.grounded,
+    specialTurnaround: options.specialTurnaround || null,
     inputHorizontal: clamp(Number(options.input?.horizontal) || 0, -1, 1),
     inputVertical: clamp(Number(options.input?.vertical) || 0, -1, 1)
   };
   player.actionName = name;
   if (!source.jab) { player.jabStep = 0; player.jabTimer = 0; }
-  player.shielding = false; player.parryFrames = 0; player.tumbling = false; player.tumbleRecoverFrames = 0; player.techWindow = 0; player.knockdownFrames = 0;
+  player.shielding = false; player.parryFrames = 0; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false; player.tumbling = false; player.tumbleRecoverFrames = 0; player.freefall = false; player.techWindow = 0; player.knockdownFrames = 0;
   emit(world, 'action', { player: player.i, action: name, variant: player.action.variant });
   return true;
 }
@@ -324,7 +393,7 @@ function startUltimate(world, player) {
   };
   player.actionName = 'ultimate';
   player.actionBuffer = null; player.jumpBuffer = 0; player.shieldBuffer = 0;
-  player.shielding = false; player.parryFrames = 0; player.tumbling = false;
+  player.shielding = false; player.parryFrames = 0; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false; player.tumbling = false;
   player.knockdownFrames = 0; player.vx *= player.grounded ? .35 : .75;
   const color = colorOf(player);
   if (move.ultimateKind === 'volt') {
@@ -421,18 +490,22 @@ function spawnTrap(world, player, move) {
   world.entities.push({ id: world.nextEntityId++, ...data });
 }
 
-function beginGrab(world, player) {
-  player.action = { name: 'grab', frame: 0, move: { startup: 5, active: 3, recovery: 17 }, hit: [] };
+function beginGrab(world, player, variant = 'normal') {
+  const dash = variant === 'dash', shield = variant === 'shield';
+  const move = dash
+    ? { startup: 7, active: 3, recovery: 22, grabReach: 76, grabHeight: 48 }
+    : { startup: shield ? 9 : 5, active: 3, recovery: 17, grabReach: 58, grabHeight: 48 };
+  player.action = { name: 'grab', frame: 0, move, hit: [], variant };
   player.actionName = 'grab';
-  player.parryFrames = 0; player.tumbling = false; player.techWindow = 0; player.knockdownFrames = 0;
-  emit(world, 'action', { player: player.i, action: 'grab' });
+  player.parryFrames = 0; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false; player.tumbling = false; player.techWindow = 0; player.knockdownFrames = 0;
+  emit(world, 'action', { player: player.i, action: 'grab', variant });
 }
 
 function resolveGrab(world, player) {
   if (player.grabbing != null) return;
   const hitbox = grabHitbox(player);
   const target = world.players
-    .filter(other => other.i !== player.i && !other.eliminated && other.respawn <= 0 && other.invincible <= 0 && other.grabbedBy == null
+    .filter(other => other.i !== player.i && !other.eliminated && other.respawn <= 0 && other.invincible <= 0 && other.grabbedBy == null && (other.grabImmunity || 0) <= 0
       && (!world.rules.teams || world.rules.friendlyFire || other.team !== player.team)
       && Math.sign(other.x - player.x || player.face) === player.face
       && playerHurtboxes(other).some(hurtbox => hitboxTouchesCircle(hitbox, hurtbox)))
@@ -454,6 +527,7 @@ function queueThrow(player, input) {
   player.pendingThrow = { name, up, down, back, releaseFrame };
   player.action = { name: 'throw', frame: 0, move: { startup: releaseFrame, active: 1, recovery }, hit: [] };
   player.actionName = name;
+  player.invincible = Math.max(player.invincible, releaseFrame + recovery);
 }
 
 function throwTarget(world, player) {
@@ -462,7 +536,14 @@ function throwTarget(world, player) {
   if (!target || !queued) { player.grabbing = null; player.pendingThrow = null; return; }
   const { up, down, back, name } = queued;
   const direction = back ? -player.face : player.face;
-  const move = { name, damage: up ? 7 : down ? 6 : 8, kx: up || down ? 120 : 305, ky: up ? 410 : down ? 115 : 155, hitstop: 6, meteor: down };
+  const move = back
+    ? { name, damage: 10, kx: 390, ky: 175, knockbackGrowth: 1.08, hitstop: 7 }
+    : up
+      ? { name, damage: 9, kx: 135, ky: 400, knockbackGrowth: .96, hitstop: 6 }
+      : down
+        ? { name, damage: 6, kx: 90, ky: 170, knockbackGrowth: .48, hitstun: 18, hitstop: 5 }
+        : { name, damage: 7, kx: 240, ky: 135, knockbackGrowth: .72, hitstop: 5 };
+  target.grabImmunity = Math.max(target.grabImmunity || 0, REGRAB_LOCK_FRAMES);
   target.grabbedBy = null; player.grabbing = null; player.grabFrames = 0; player.grabEscape = 0; player.grabPummelCooldown = 0; player.pendingThrow = null;
   hitPlayer(world, player, target, move, direction);
   player.action.frame = player.action.move.startup;
@@ -493,6 +574,8 @@ function applyDirectionalInfluence(vx, vy, input) {
 function hitPlayer(world, attacker, target, move, direction) {
   if (target.invincible > 0 || target.eliminated || target.respawn > 0) return false;
   if (world.rules.teams && !world.rules.friendlyFire && attacker.team === target.team) return false;
+  const interruptedFreefall = !!target.freefall;
+  const crouchKnockbackMultiplier = target.grounded && ['crouch', 'crawl'].includes(target.actionName) ? .85 : 1;
   const interruptedDropPlatform = target.dropThroughFrames > 0
     ? world.platforms.find(platform => {
       if (!platform.passThrough) return false;
@@ -546,7 +629,7 @@ function hitPlayer(world, attacker, target, move, direction) {
     target.hitstop = Math.max(target.hitstop || 0, 3);
     target.parryFrames = 0; target.shielding = false; target.shieldBuffer = 0;
     target.shieldDropLag = 0; target.invincible = Math.max(target.invincible || 0, 4);
-    target.shield = Math.min(100, target.shield + 12); target.actionName = 'parrySuccess';
+    target.actionName = 'parrySuccess';
     emit(world, 'parry', {
       player: target.i, attacker: attacker.i,
       x: move.contactX ?? target.x + direction * target.width * .45,
@@ -559,13 +642,17 @@ function hitPlayer(world, attacker, target, move, direction) {
   const stale = staleMultiplier(attacker, moveName);
   const shortHopMultiplier = move.shortHop ? 0.85 : 1;
   if (target.shielding) {
-    const shieldDamage = move.damage * stale * shortHopMultiplier;
-    target.shield = Math.max(0, target.shield - shieldDamage * 2.38);
+    const shieldDamage = move.damage * stale * shortHopMultiplier * Math.max(0, move.shieldDamageMultiplier ?? 1);
+    target.shield = Math.max(0, target.shield - shieldDamage * 1.19);
     target.shieldStun = Math.max(target.shieldStun || 0, Math.floor(shieldDamage * 0.8 * (move.name?.startsWith('air') || move.projectile ? 0.8 : 1) + 2));
     const shieldPush = Math.min(145, (target.shieldStun + 1) * 9.9);
     target.vx = direction * shieldPush; attacker.vx -= direction * Math.min(170, 18 + shieldDamage * 6);
     target.hitstop = Math.max(3, move.hitstop - 2); attacker.hitstop = 3;
-    if (target.shield <= 0) { target.shield = 25; target.shielding = false; target.stun = 87; target.shieldLock = 120; emit(world, 'shield-break', { player: target.i }); }
+    if (target.shield <= 0) {
+      target.shield = SHIELD_MAX * .25; target.shielding = false; target.stun = 87; target.dizzyFrames = 87;
+      target.shieldLock = 120; target.shieldHoldFrames = 0; target.shieldReleaseQueued = false;
+      emit(world, 'shield-break', { player: target.i });
+    }
     else emit(world, 'shield-hit', {
       player: target.i, attacker: attacker.i, ultimate: ultimateHit,
       x: move.contactX ?? target.x, y: move.contactY ?? target.y,
@@ -578,20 +665,44 @@ function hitPlayer(world, attacker, target, move, direction) {
     target.comboAttacker = attacker.i;
   }
   const comboMultiplier = Math.max(.65, 1 - target.comboCount * .06);
-  const damage = move.damage * stale * shortHopMultiplier * comboMultiplier;
+  const oneOnOneMultiplier = world.oneOnOneDamage ? 1.2 : 1;
+  const damage = move.damage * stale * shortHopMultiplier * comboMultiplier * oneOnOneMultiplier;
+  if (move.noFlinch) {
+    target.damage += damage;
+    target.comboCount += 1; target.comboTimer = 90; target.comboAttacker = attacker.i; recordStale(attacker, moveName);
+    if (!ultimateHit && attacker.i >= 0) attacker.ultimateMeter = clamp((attacker.ultimateMeter || 0) + damage * 1.15, 0, ULTIMATE_READY);
+    target.ultimateMeter = clamp((target.ultimateMeter || 0) + damage * .72, 0, ULTIMATE_READY);
+    const hitlag = Math.max(0, Number(move.hitstop) || 0);
+    attacker.hitstop = Math.max(attacker.hitstop || 0, Math.min(2, hitlag));
+    target.hitstop = Math.max(target.hitstop || 0, Math.min(2, hitlag));
+    target.lastDamager = attacker.i; target.hitId += 1;
+    emit(world, 'hit', {
+      attacker: attacker.i, player: target.i, damage, targetDamage: target.damage,
+      comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y,
+      power: hitlag, launchSpeed: 0, launchAngle: 0, critical: false, finisherFlight: false,
+      ultimate: ultimateHit, move: moveName, quality: 'noFlinch', color: colorOf(attacker)
+    });
+    return true;
+  }
   const knockbackGrowth = Math.max(0, Number(move.knockbackGrowth ?? 1));
-  const scale = (1 + target.damage / 85 * knockbackGrowth) / characterOf(target).weight;
+  // Ultimate knockback uses the defender's percent after this hit is applied.
+  // Including the current hit makes a strong move at 0% launch slightly farther
+  // than a weak move that leaves the defender at the same pre-hit percent.
+  const projectedDamage = target.damage + damage;
+  const scale = (1 + projectedDamage / 85 * knockbackGrowth) / characterOf(target).weight;
   const launchGrowth = !move.groundedFlinch && knockbackGrowth >= .65
     ? 1 + clamp((target.damage - 70) / 110, 0, 1) * .28
     : 1;
   const rage = 1 + clamp(((attacker.damage || 0) - 35) / 115, 0, 1) * 0.1;
   const armorAction = target.action;
   const armorStartup = armorAction ? armorAction.startup ?? armorAction.move.startup : 0;
-  const armorThreshold = Number(armorAction?.move?.armorThreshold ?? Infinity);
-  const armored = !!armorAction?.move?.armor
+  const armorType = armorAction?.move?.armorType
+    || (armorAction?.move?.armorThreshold != null ? 'heavy' : armorAction?.move?.armor ? 'super' : null);
+  const armorThreshold = Number(armorAction?.move?.armorThreshold ?? 0);
+  const armored = !!armorType
     && armorAction.frame >= armorStartup
     && armorAction.frame < armorStartup + armorAction.move.active
-    && damage <= armorThreshold;
+    && (armorType === 'super' || armorType === 'heavy' && damage <= armorThreshold);
   if (!armored) {
     if (target.action?.name === 'ultimate') {
       for (const entity of world.entities) {
@@ -609,11 +720,13 @@ function hitPlayer(world, attacker, target, move, direction) {
       if (held) held.grabbedBy = null;
       target.grabbing = null; target.grabFrames = 0; target.grabEscape = 0; target.grabPummelCooldown = 0;
     }
-    target.action = null; target.charge = null; target.shielding = false; target.actionName = 'hit'; target.ledge = null;
+    target.action = null; target.charge = null; target.shielding = false; target.actionName = 'hit'; target.ledge = null; target.freefall = false;
+    target.dizzyFrames = 0;
     target.knockdownFrames = 0; target.techWindow = 0; target.tumbleRecoverFrames = 0;
     target.canLedgeInvincible = true; target.ledgeGrabs = 0;
   }
-  target.damage += damage; target.comboCount += 1; target.comboTimer = 90; target.comboAttacker = attacker.i; recordStale(attacker, moveName);
+  target.damage += damage;
+  target.comboCount += 1; target.comboTimer = 90; target.comboAttacker = attacker.i; recordStale(attacker, moveName);
   if (!ultimateHit && attacker.i >= 0) attacker.ultimateMeter = clamp((attacker.ultimateMeter || 0) + damage * 1.15, 0, ULTIMATE_READY);
   target.ultimateMeter = clamp((target.ultimateMeter || 0) + damage * 0.72, 0, ULTIMATE_READY);
   if (interruptedDropPlatform) {
@@ -628,24 +741,26 @@ function hitPlayer(world, attacker, target, move, direction) {
   // frame trap. A third consecutive flinch pops the defender out far enough to
   // DI, air-dodge or reset neutral instead of being pinned in place forever.
   const groundedFlinch = requestedGroundedFlinch && target.comboCount <= 2;
-  let launchX = direction * (move.fixedKx ?? move.kx) * scale * rage * launchGrowth;
-  let launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) * scale : -Math.abs(move.fixedKy ?? move.ky) * Math.min(scale, 2.2)) * rage * launchGrowth;
+  let launchX = direction * (move.fixedKx ?? move.kx) * scale * rage * launchGrowth * crouchKnockbackMultiplier;
+  let launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) * scale : -Math.abs(move.fixedKy ?? move.ky) * Math.min(scale, 2.2)) * rage * launchGrowth * crouchKnockbackMultiplier;
   if (requestedGroundedFlinch && !groundedFlinch) {
     const escapePush = 150 + Math.min(3, target.comboCount - 3) * 22;
     launchX = direction * Math.max(Math.abs(launchX) * 1.35, escapePush);
     launchY = -Math.max(Math.abs(launchY), 125);
   }
   const launch = groundedFlinch ? { vx: launchX, vy: 0 } : applyDirectionalInfluence(launchX, launchY, target.lastInput);
-  target.vx = launch.vx; target.vy = launch.vy; target.canSdi = true; target.sdiCooldown = 1; target.lastSdiHorizontal = 0; target.lastSdiVertical = 0;
+  const armoredVx = target.vx, armoredVy = target.vy;
+  target.vx = launch.vx; target.vy = launch.vy; target.canSdi = !armored; target.sdiCooldown = 1; target.lastSdiHorizontal = 0; target.lastSdiVertical = 0;
   const uncappedLaunchSpeed = Math.hypot(target.vx, target.vy);
   if (uncappedLaunchSpeed > 1120) {
     const cap = 1120 / uncappedLaunchSpeed;
     target.vx *= cap;
     target.vy *= cap;
   }
-  const launchSpeed = Math.hypot(target.vx, target.vy);
-  const critical = launchSpeed >= 720 || (target.damage >= 110 && launchSpeed >= 560);
-  const finisherFlight = !groundedFlinch && target.damage >= 110 && launchSpeed >= 620;
+  if (armored) { target.vx = armoredVx; target.vy = armoredVy; }
+  const launchSpeed = armored ? 0 : Math.hypot(target.vx, target.vy);
+  const critical = !armored && (launchSpeed >= 720 || (target.damage >= 110 && launchSpeed >= 560));
+  const finisherFlight = !armored && !groundedFlinch && target.damage >= 110 && launchSpeed >= 620;
   target.launchDecay = clamp(5.2 + launchSpeed / 330, 6.2, 9.2);
   target.criticalFlightFrames = finisherFlight ? clamp(Math.round(10 + (launchSpeed - 620) / 55), 10, 22) : 0;
   if (critical) {
@@ -661,16 +776,27 @@ function hitPlayer(world, attacker, target, move, direction) {
   const comboStunMultiplier = Math.max(.72, 1 - Math.max(0, target.comboCount - 3) * .07);
   target.stun = armored ? 0 : Math.max(4, Math.round(baseHitstun * comboStunMultiplier));
   target.grounded = groundedFlinch; target.hitId += 1;
-  if (!armored) target.tumbling = !groundedFlinch;
+  if (!armored) {
+    target.tumbling = !groundedFlinch;
+    if (interruptedFreefall && !groundedFlinch) {
+      target.recoveryAvailable = true;
+      target.jumps = 0;
+    }
+  }
   emit(world, 'hit', { attacker: attacker.i, player: target.i, damage, targetDamage: target.damage, comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y, power: move.hitstop, launchSpeed, launchAngle: Math.atan2(target.vy, target.vx), critical, finisherFlight, ultimate: ultimateHit, move: moveName, quality: move.sweet ? 'sweet' : 'normal', color: colorOf(attacker) });
   return true;
 }
 
 function playerHurtboxes(player) {
   if (player.shielding) {
-    const shieldScale = .58 + .42 * clamp(player.shield / 100, 0, 1);
+    const shieldScale = .58 + .42 * clamp(player.shield / SHIELD_MAX, 0, 1);
     const visualRadius = Math.max(player.width * .9 + 15, player.height * .75 + 12);
-    return [{ part: 'shield', x: player.x, y: player.y, radius: visualRadius * shieldScale }];
+    return [{
+      part: 'shield',
+      x: player.x + (player.shieldOffsetX || 0),
+      y: player.y + (player.shieldOffsetY || 0),
+      radius: visualRadius * shieldScale
+    }];
   }
   if ((player.actionName === 'tumble' || player.tumbling) && !player.grounded) {
     return [{ part: 'tumble', x: player.x, y: player.y, radius: Math.max(player.width * .45, player.height * .52) }];
@@ -683,7 +809,7 @@ function playerHurtboxes(player) {
       { part: 'legs', x: player.x - player.face * player.height * .27, y, radius: Math.max(10, player.width * .23) }
     ];
   }
-  const crouched = player.actionName === 'crouch' || player.actionName === 'landing' || player.actionName === 'groundHit';
+  const crouched = player.actionName === 'crouch' || player.actionName === 'crawl' || player.actionName === 'landing' || player.actionName === 'groundHit';
   const compressed = crouched ? .7 : 1;
   const centerY = player.y + (crouched ? player.height * .16 : 0);
   return [
@@ -712,7 +838,9 @@ function hitContactPoint(hitbox, circle) {
 }
 
 function grabHitbox(player) {
-  return { type: 'box', x: player.x + player.face * 29, y: player.y, w: 58, h: 48, grab: true };
+  const width = player.action?.move?.grabReach || 58;
+  const height = player.action?.move?.grabHeight || 48;
+  return { type: 'box', x: player.x + player.face * width / 2, y: player.y, w: width, h: height, grab: true };
 }
 
 function sweetspotHit(player, target, move, hitbox) {
@@ -775,7 +903,7 @@ function attackHitbox(player, move) {
   }
   const direction = move.backward ? -player.face : player.face;
   const near = player.width * .16, far = Math.max(near + 12, move.reachX);
-  return { type: 'box', x: player.x + direction * (near + far) / 2, y: player.y, w: far - near, h: move.reachY * .82 };
+  return { type: 'box', x: player.x + direction * (near + far) / 2, y: player.y + (move.hitboxShiftY || 0), w: far - near, h: move.reachY * .82 };
 }
 
 function visualStrikePoints(player, move, actionName, hitbox) {
@@ -803,23 +931,38 @@ function hasAttackGeometry(move) {
   return !!move && Number.isFinite(move.reachX) && (move.radial || Number.isFinite(move.reachY));
 }
 
-function processAction(world, player, input) {
+function processAction(world, player, input, previous) {
   if (!player.action) return;
   const action = player.action;
   const { move } = action;
   const startup = action.startup ?? move.startup;
+  if (action.name.startsWith('special') && !action.activated && action.frame < Math.min(startup, SPECIAL_TURNAROUND_FRAMES)) {
+    const direction = freshHorizontalDirection(input, previous);
+    if (direction && direction !== player.face) {
+      player.face = direction;
+      action.inputHorizontal = direction;
+      action.specialTurnaround = 'direction';
+      emit(world, 'special-turnaround', { player: player.i, action: action.name, kind: 'direction', direction });
+    }
+  }
   if (move.chargeable && !action.charged) {
     const chargeButton = action.chargeButton || (action.name.startsWith('special') ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
     const held = bit(input.buttons, chargeButton);
-    if (held) action.holdFrames = Math.min(90, action.holdFrames + 1);
-    if (action.frame >= startup - 1 && held && action.holdFrames < 90) {
+    if (held) action.holdFrames = Math.min(SMASH_MAX_HOLD_FRAMES, action.holdFrames + 1);
+    if (action.frame >= startup - 1 && held && action.holdFrames < SMASH_MAX_HOLD_FRAMES) {
       action.charging = action.variant === 'smash' || action.holdFrames >= 10;
       player.vx *= player.grounded ? .7 : .96;
       return;
     }
-    if (!held || action.holdFrames >= 90) {
-      if (action.charging || action.holdFrames >= 90) {
-      const scale = 1 + (Math.max(10, action.holdFrames) - 10) / 100;
+    if (!held || action.holdFrames >= SMASH_MAX_HOLD_FRAMES) {
+      if (action.charging || action.holdFrames >= SMASH_MAX_HOLD_FRAMES) {
+      const chargeProgress = clamp(
+        (Math.max(SMASH_HOLD_FRAMES, action.holdFrames) - SMASH_HOLD_FRAMES)
+          / (SMASH_MAX_HOLD_FRAMES - SMASH_HOLD_FRAMES),
+        0,
+        1
+      );
+      const scale = 1 + chargeProgress * (SMASH_MAX_DAMAGE_SCALE - 1);
       const knockbackScale = 1 + (scale - 1) * .625;
       move.damage *= scale; move.kx *= knockbackScale; move.ky *= knockbackScale;
       action.chargeScale = scale; action.charging = false; action.charged = true;
@@ -845,7 +988,10 @@ function processAction(world, player, input) {
     if (move.jab && move.jab < 3) { player.jabStep = move.jab; player.jabTimer = 18; }
     else if (move.jab === 3) { player.jabStep = 0; player.jabTimer = 0; }
     player.pendingLandingLag = 0;
-    player.action = null; player.actionName = player.grounded ? 'idle' : 'fall';
+    const entersFreefall = action.name === 'specialUp' && !player.grounded && move.causesFreefall !== false;
+    player.action = null;
+    player.freefall = entersFreefall;
+    player.actionName = player.grounded ? 'idle' : entersFreefall ? 'freefall' : 'fall';
     if (interruptible) emit(world, 'action-cancel', { player: player.i, action: action.name, frame: action.frame });
   }
 }
@@ -897,7 +1043,7 @@ function performDodge(player, name, baseFrames, baseInvincible, vx = 0, vy = nul
   player.dodgeFatigueCooldown = 90;
   player.vx = player.dodgeWindupFrames ? initialVx : vx;
   if (vy != null) player.vy = player.dodgeWindupFrames ? initialVy : vy;
-  player.actionName = name; player.shielding = false; player.parryFrames = 0;
+  player.actionName = name; player.shielding = false; player.parryFrames = 0; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
   player.tumbling = false; player.tumbleRecoverFrames = 0; player.techWindow = 0; player.shieldBuffer = 0;
 }
 
@@ -951,7 +1097,8 @@ function processKnockdown(world, player, input, previous) {
   if (player.knockdownFrames <= 0) return false;
   player.knockdownFrames -= 1;
   player.vx = approach(player.vx, 0, 70);
-  if (pressed(input, previous, BUTTONS.ATTACK) || bit(input.buttons, BUTTONS.ATTACK)) {
+  if (pressed(input, previous, BUTTONS.ATTACK) || bit(input.buttons, BUTTONS.ATTACK)
+    || pressed(input, previous, BUTTONS.SPECIAL) || bit(input.buttons, BUTTONS.SPECIAL)) {
     player.knockdownFrames = 0;
     startGetupAttack(world, player);
     emit(world, 'getup', { player: player.i, option: 'attack' });
@@ -978,14 +1125,22 @@ function tryLedge(world, player) {
     for (const ledge of ledges) {
       const belowTop = player.y >= platform.y - Math.min(18, player.height * .22);
       if (Math.abs(player.x - ledge.x) < 24 && belowTop && player.y < platform.y + 36) {
+        const holder = world.players.find(other => other.i !== player.i && other.ledge
+          && other.ledge.platformId === platform.id && Math.abs(other.ledge.x - ledge.x) < 2);
+        if (holder) {
+          holder.ledge = null; holder.ledgeInvincible = 0; holder.invincible = 0;
+          holder.vx = -ledge.face * 165; holder.vy = 75; holder.canLedgeInvincible = false;
+          holder.actionName = 'ledgeTrumped';
+          emit(world, 'ledge-trump', { player: player.i, target: holder.i, x: ledge.x, y: platform.y });
+        }
         player.ledge = { platformId: platform.id, x: ledge.x, y: platform.y, face: ledge.face };
         player.x = ledge.x - ledge.face * 16; player.y = platform.y + 20; player.vx = 0; player.vy = 0; player.criticalFlightFrames = 0;
-        player.face = ledge.face; player.actionName = 'ledge'; player.tumbling = false; player.techWindow = 0;
+        player.face = ledge.face; player.actionName = 'ledgeCatch'; player.tumbling = false; player.freefall = false; player.techWindow = 0; player.ledgeCatchFrames = 1;
         player.jumps = Math.max(1, player.jumps); player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false;
         player.ledgeGrabs += 1;
         if (player.canLedgeInvincible) player.ledgeInvincible = Math.max(12, 31 - player.ledgeGrabs * 2);
         else player.ledgeInvincible = 0;
-        player.invincible = Math.max(player.invincible, player.ledgeInvincible);
+        player.invincible = 0;
         emit(world, 'ledge', { player: player.i }); return true;
       }
     }
@@ -995,9 +1150,18 @@ function tryLedge(world, player) {
 
 function processLedge(world, player, input, previous) {
   if (!player.ledge) return false;
+  if (player.ledgeCatchFrames > 0) {
+    player.ledgeCatchFrames -= 1;
+    player.invincible = 0;
+    player.actionName = 'ledgeCatch';
+    return true;
+  }
   player.ledgeInvincible = Math.max(0, player.ledgeInvincible - 1);
   player.invincible = Math.max(player.invincible, player.ledgeInvincible);
   const inward = input.horizontal * player.ledge.face > 0.35;
+  const outward = input.horizontal * player.ledge.face < -0.35;
+  const inwardPressed = inward && previous.horizontal * player.ledge.face <= .35;
+  const outwardPressed = outward && previous.horizontal * player.ledge.face >= -.35;
   const platform = world.platforms.find(item => item.id === player.ledge.platformId);
   const standOnPlatform = offset => {
     if (!platform) return;
@@ -1006,12 +1170,16 @@ function processLedge(world, player, input, previous) {
   };
   if (pressed(input, previous, BUTTONS.UP)) {
     player.y -= 34; player.vy = -430; player.jumps = Math.max(1, player.jumps); player.ledge = null; player.actionName = 'ledgeJump';
-  } else if (pressed(input, previous, BUTTONS.ATTACK)) {
+  } else if (pressed(input, previous, BUTTONS.ATTACK) || pressed(input, previous, BUTTONS.SPECIAL)) {
     standOnPlatform(38); startMove(world, player, 'groundNeutral');
-  } else if (pressed(input, previous, BUTTONS.SHIELD) || inward) {
+  } else if (pressed(input, previous, BUTTONS.SHIELD) || pressed(input, previous, BUTTONS.GRAB)) {
     standOnPlatform(75); performDodge(player, 'ledgeRoll', 18, 18, player.face * 420);
-  } else if (pressed(input, previous, BUTTONS.DOWN)) {
-    player.ledge = null; player.vy = 80; player.canLedgeInvincible = false;
+  } else if (inwardPressed) {
+    standOnPlatform(38); player.dodgeFrames = 1; player.dodgeTotalFrames = 1; player.actionName = 'ledgeGetup';
+  } else if (pressed(input, previous, BUTTONS.DOWN) || outwardPressed) {
+    const fastDrop = pressed(input, previous, BUTTONS.DOWN);
+    player.ledge = null; player.vy = fastDrop ? 260 : 80; player.fastFalling = fastDrop; player.canLedgeInvincible = false;
+    player.actionName = fastDrop ? 'fastFall' : 'fall';
   }
   return true;
 }
@@ -1040,7 +1208,7 @@ function useHeldItem(world, player) {
   const item = player.heldItem;
   if (!item) return false;
   if (item.kind === 'heal-shield') {
-    player.shield = Math.min(100, player.shield + item.amount);
+    player.shield = Math.min(SHIELD_MAX, player.shield + item.amount);
     beginItemAction(world, player, 'itemBattery', { startup: 0, active: 1, recovery: 9, defensiveOnly: true, motion: 'deploy' });
   } else if (item.kind === 'jump') {
     player.jumpBuff = item.duration;
@@ -1083,8 +1251,15 @@ function updatePlayer(world, player, rawInput) {
     seq: Number(rawInput?.seq) || player.ackSeq
   };
   const previous = player.lastInput;
+  const specialFlickDirection = freshHorizontalDirection(input, previous);
+  if (specialFlickDirection) {
+    player.specialFlickDirection = specialFlickDirection;
+    player.specialFlickFrames = SPECIAL_TURNAROUND_FRAMES;
+    player.specialFlickFacing = player.face;
+  } else player.specialFlickFrames = Math.max(0, (player.specialFlickFrames || 0) - 1);
   player.ackSeq = Math.max(player.ackSeq, input.seq);
   player.projectileCooldown = Math.max(0, (player.projectileCooldown || 0) - 1);
+  player.grabImmunity = Math.max(0, (player.grabImmunity || 0) - 1);
   const character = characterOf(player);
   if (player.grounded && player.platformId) {
     const platform = world.platforms.find(item => item.id === player.platformId);
@@ -1094,10 +1269,37 @@ function updatePlayer(world, player, rawInput) {
   if (player.eliminated) { player.lastInput = input; return; }
   if (player.respawn > 0) {
     player.respawn -= 1;
-    if (player.respawn === 0) { resetPlayerState(world, player, { x: 640, y: 220, invincible: 120 }); player.shield = 100; }
+    if (player.respawn === 0) {
+      resetPlayerState(world, player, { x: 640, y: 132, invincible: 120 });
+      player.shield = SHIELD_MAX;
+      player.respawnPlatformFrames = 120;
+      player.grounded = true;
+      player.actionName = 'respawn';
+    }
     player.lastInput = input; return;
   }
+  if (player.respawnPlatformFrames > 0) {
+    const leavePlatform = input.buttons !== 0 || Math.abs(input.horizontal) > .25 || Math.abs(input.vertical) > .25;
+    player.respawnPlatformFrames = Math.max(0, player.respawnPlatformFrames - 1);
+    player.invincible = player.respawnPlatformFrames;
+    player.vx = 0; player.vy = 0; player.grounded = true; player.platformId = null;
+    player.y = 132 + (120 - player.respawnPlatformFrames) * .08;
+    player.actionName = 'respawn';
+    if (leavePlatform || player.respawnPlatformFrames === 0) {
+      player.respawnPlatformFrames = 0;
+      player.grounded = false;
+      player.vy = 45;
+      player.actionName = 'fall';
+    }
+    player.lastInput = input;
+    return;
+  }
   bufferActionInput(player, input, previous);
+  if (player.freefall) {
+    player.actionBuffer = null;
+    player.jumpBuffer = 0;
+    player.shieldBuffer = 0;
+  }
   if (!player.grounded && player.tumbling && pressed(input, previous, BUTTONS.SHIELD)) player.techWindow = 9;
   if (player.hitstop > 0) {
     player.sdiCooldown = Math.max(0, (player.sdiCooldown || 0) - 1);
@@ -1176,7 +1378,7 @@ function updatePlayer(world, player, rawInput) {
       player.action.frame += 1;
       player.actionName = player.pendingThrow.name;
       if (player.action.frame >= player.pendingThrow.releaseFrame) throwTarget(world, player);
-    } else if (pressed(input, previous, BUTTONS.ATTACK) && player.grabPummelCooldown === 0) {
+    } else if ((pressed(input, previous, BUTTONS.ATTACK) || pressed(input, previous, BUTTONS.GRAB)) && player.grabPummelCooldown === 0) {
       const pummelDamage = 1.3 * staleMultiplier(player, 'pummel');
       target.damage += pummelDamage; target.hitId += 1; target.lastDamager = player.i; player.hitstop = 2; target.hitstop = Math.max(target.hitstop, 3);
       player.grabPummelCooldown = 12; player.actionBuffer = null; player.actionName = 'pummel'; recordStale(player, 'pummel');
@@ -1191,13 +1393,28 @@ function updatePlayer(world, player, rawInput) {
   const wasStunned = player.stun > 0;
   player.invincible = Math.max(0, player.invincible - 1);
   player.parryFrames = Math.max(0, player.parryFrames - 1);
+  if (player.dizzyFrames > 0 && player.stun > 0) {
+    const buttonMash = ((input.buttons ^ previous.buttons) & 255).toString(2).replace(/0/g, '').length;
+    const axisMash = (Math.abs(input.horizontal - (player.lastMashHorizontal || 0)) > .65 ? 1 : 0)
+      + (Math.abs(input.vertical - (player.lastMashVertical || 0)) > .65 ? 1 : 0);
+    const mash = buttonMash + axisMash;
+    if (mash > 0) {
+      const reduction = mash * 2;
+      player.stun = Math.max(0, player.stun - reduction);
+      player.dizzyFrames = Math.max(0, player.dizzyFrames - reduction);
+      emit(world, 'stun-mash', { player: player.i, reduction });
+    }
+    player.lastMashButtons = input.buttons;
+    player.lastMashHorizontal = input.horizontal;
+    player.lastMashVertical = input.vertical;
+  }
   player.stun = Math.max(0, player.stun - 1);
+  player.dizzyFrames = Math.min(player.stun, Math.max(0, (player.dizzyFrames || 0) - 1));
   if (wasStunned && player.stun === 0 && !player.grounded && player.tumbling) {
     player.tumbleRecoverFrames = 8;
     player.actionName = 'airRecover';
   } else if (player.tumbleRecoverFrames > 0) {
     player.tumbleRecoverFrames -= 1;
-    if (player.tumbleRecoverFrames === 0 && player.actionName === 'airRecover') player.tumbling = false;
   }
   player.dodgeFrames = Math.max(0, player.dodgeFrames - 1);
   if (player.dodgeFrames > 0) player.dodgeElapsed = Math.min(player.dodgeTotalFrames, (player.dodgeElapsed || 0) + 1);
@@ -1214,6 +1431,8 @@ function updatePlayer(world, player, rawInput) {
   player.shortHopFrames = Math.max(0, (player.shortHopFrames || 0) - 1);
   player.techWindow = Math.max(0, player.techWindow - 1);
   player.dropThroughFrames = Math.max(0, (player.dropThroughFrames || 0) - 1);
+  player.fastFallFlashFrames = Math.max(0, (player.fastFallFlashFrames || 0) - 1);
+  player.footstoolCooldown = Math.max(0, (player.footstoolCooldown || 0) - 1);
   player.dodgeFatigueCooldown = Math.max(0, (player.dodgeFatigueCooldown || 0) - 1);
   player.dashFrames = Math.max(0, (player.dashFrames || 0) - 1);
   if (player.dodgeFatigueCooldown === 0) player.dodgeFatigue = Math.max(0, (player.dodgeFatigue || 0) - 0.012);
@@ -1221,11 +1440,11 @@ function updatePlayer(world, player, rawInput) {
   if (!player.grounded && player.coyoteFrames === 0 && player.jumps === 2 && !player.ledge) player.jumps = 1;
   if (player.jumpSquatFrames > 0) { processJumpSquat(world, player, input, previous); player.lastInput = input; return; }
   if (processKnockdown(world, player, input, previous)) { player.lastInput = input; return; }
-  if (player.action) processAction(world, player, input);
+  if (player.action) processAction(world, player, input, previous);
   const spotCancel = player.actionName === 'spotDodge' && player.dodgeFrames > 0 && player.dodgeFrames <= 5
     && (player.actionBuffer?.type === 'attack' || player.actionBuffer?.type === 'special');
   if (spotCancel) player.dodgeFrames = 0;
-  const locked = player.stun > 0 || player.dodgeFrames > 0 || player.landingLag > 0 || player.shieldStun > 0 || player.shieldDropLag > 0 || player.action;
+  const locked = player.stun > 0 || player.freefall || player.dodgeFrames > 0 || player.landingLag > 0 || player.shieldStun > 0 || player.shieldDropLag > 0 || player.action;
 
   if (!locked && player.shieldBuffer > 0 && bit(input.buttons, BUTTONS.SHIELD)) {
     player.shieldBuffer = 0;
@@ -1236,30 +1455,59 @@ function updatePlayer(world, player, rawInput) {
     } else if (player.grounded && Math.abs(input.horizontal) > 0.4) {
       performDodge(player, 'roll', 22, 16, input.horizontal * 600 * character.speed);
     } else if (player.grounded && player.shieldLock === 0) {
-      player.shielding = true; player.actionName = 'shield';
+      player.shielding = true; player.shieldHoldFrames = 1; player.shieldReleaseQueued = false; player.actionName = 'shield';
     }
   }
   if (player.shielding) {
-    const shieldSpotDodge = player.grounded && pressed(input, previous, BUTTONS.DOWN);
-    const shieldRoll = player.grounded && Math.abs(input.horizontal) > 0.4 && (pressed(input, previous, BUTTONS.LEFT) || pressed(input, previous, BUTTONS.RIGHT));
+    player.shieldHoldFrames = Math.min(999, (player.shieldHoldFrames || 0) + 1);
+    const shieldShift = bit(input.buttons, BUTTONS.SPECIAL) && !pressed(input, previous, BUTTONS.SPECIAL);
+    const shieldSpotDodge = !shieldShift && player.grounded && pressed(input, previous, BUTTONS.DOWN);
+    const shieldRoll = !shieldShift && player.grounded && Math.abs(input.horizontal) > 0.4 && (pressed(input, previous, BUTTONS.LEFT) || pressed(input, previous, BUTTONS.RIGHT));
     if (player.shieldStun > 0) { player.actionName = 'shieldHit'; player.vx *= .92; }
     else if (shieldSpotDodge) performDodge(player, 'spotDodge', 24, 14, 0);
     else if (shieldRoll) performDodge(player, 'roll', 22, 16, input.horizontal * 600 * character.speed);
-    else if (!bit(input.buttons, BUTTONS.SHIELD) || !player.grounded || player.shieldLock > 0) {
+    else if ((!bit(input.buttons, BUTTONS.SHIELD) && player.shieldHoldFrames >= 3) || !player.grounded || player.shieldLock > 0) {
       player.shielding = false;
-      player.parryFrames = 0;
-      player.shieldDropLag = 8;
+      player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
+      player.shieldDropLag = Math.max(player.shieldDropLag, 11);
     }
     else {
-      player.shield = Math.max(0, player.shield - 0.12);
+      player.shield = Math.max(0, player.shield - 0.06);
       player.vx *= 0.82;
+      if (player.shield <= 0) {
+        player.shield = SHIELD_MAX * .25; player.shielding = false; player.stun = 87; player.dizzyFrames = 87;
+        player.shieldLock = 120; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
+        emit(world, 'shield-break', { player: player.i });
+      } else if (shieldShift) {
+        player.actionBuffer = null;
+        player.shieldOffsetX = approach(player.shieldOffsetX || 0, input.horizontal * 11, 4);
+        player.shieldOffsetY = approach(player.shieldOffsetY || 0, input.vertical * 9, 3);
+        player.actionName = 'shieldShift';
+      } else {
+        player.shieldOffsetX = approach(player.shieldOffsetX || 0, 0, 4);
+        player.shieldOffsetY = approach(player.shieldOffsetY || 0, 0, 3);
+      }
     }
-  } else if (player.shieldLock === 0) player.shield = Math.min(100, player.shield + 0.18);
+  } else {
+    player.shieldOffsetX = approach(player.shieldOffsetX || 0, 0, 4);
+    player.shieldOffsetY = approach(player.shieldOffsetY || 0, 0, 3);
+    if (player.shieldLock === 0) player.shield = Math.min(SHIELD_MAX, player.shield + 0.09);
+  }
 
-  if (!locked && player.shielding && player.grounded && player.jumpBuffer > 0) player.shielding = false;
+  if (!locked && player.shielding && player.grounded && player.jumpBuffer > 0) {
+    player.shielding = false; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
+  }
 
   if (!locked && player.shielding && player.grounded && pressed(input, previous, BUTTONS.ATTACK)) {
-    player.actionBuffer = null; player.shielding = false; player.parryFrames = 0; beginGrab(world, player);
+    player.actionBuffer = null; player.shielding = false; player.parryFrames = 0; player.shieldHoldFrames = 0;
+    if (input.vertical < -.45) startMove(world, player, 'groundUp', 1, { variant: 'smash', input });
+    else beginGrab(world, player, 'shield');
+  } else if (!locked && player.shielding && player.grounded && pressed(input, previous, BUTTONS.SPECIAL) && input.vertical < -.45) {
+    player.actionBuffer = null; player.shielding = false; player.parryFrames = 0; player.shieldHoldFrames = 0;
+    if (player.recoveryAvailable) {
+      player.recoveryAvailable = false;
+      startMove(world, player, 'specialUp', 1, { input });
+    }
   }
 
   const shortHopAttack = !locked && player.shieldDropLag === 0 && player.shieldStun === 0 && !player.shielding && player.grounded && player.jumpBuffer > 0 && player.actionBuffer?.type === 'attack';
@@ -1277,18 +1525,30 @@ function updatePlayer(world, player, rawInput) {
     } else if (buffered.type === 'grab') {
       if (Math.abs(buffered.input.horizontal) > .35) player.face = Math.sign(buffered.input.horizontal);
       if (!pickupItem(world, player)) {
-        if (player.grounded) beginGrab(world, player);
+        if (player.grounded) beginGrab(world, player, player.dashFrames > 0 || Math.abs(player.vx) > 320 ? 'dash' : 'normal');
         else performAirDodge(player, buffered.input);
       }
     } else if (player.heldItem && buffered.type === 'attack') {
       if (Math.abs(buffered.input.horizontal) > .35) player.face = Math.sign(buffered.input.horizontal);
       useHeldItem(world, player);
     } else if (buffered.type === 'special') {
-      if (Math.abs(buffered.input.horizontal) > .35) player.face = Math.sign(buffered.input.horizontal);
       const name = moveName(player, buffered.input, true);
       if (name !== 'specialUp' || player.recoveryAvailable) {
         if (name === 'specialUp') player.recoveryAvailable = false;
-      startMove(world, player, name, 1, { input: buffered.input });
+        let specialTurnaround = null;
+        if (name === 'specialNeutral'
+          && player.specialFlickFrames > 0
+          && player.specialFlickDirection
+          && player.specialFlickDirection === -player.specialFlickFacing) {
+          player.face = player.specialFlickDirection;
+          player.vx = player.specialFlickDirection * Math.abs(player.vx);
+          specialTurnaround = 'momentum';
+          emit(world, 'special-turnaround', {
+            player: player.i, action: name, kind: 'momentum', direction: player.face
+          });
+        } else if (Math.abs(buffered.input.horizontal) > .35) player.face = Math.sign(buffered.input.horizontal);
+        startMove(world, player, name, 1, { input: buffered.input, specialTurnaround });
+        player.specialFlickFrames = 0;
       }
     } else if (buffered.type === 'attack') {
       let name = moveName(player, buffered.input, false);
@@ -1310,6 +1570,12 @@ function updatePlayer(world, player, rawInput) {
     || player.action.name.startsWith('air')
     || player.action.move.recoveryDrift && player.action.activated
     || !player.action.move.dash && !player.action.move.recoveryMove && !player.action.move.teleport && !player.action.move.teleportY);
+  const heldDirection = Math.abs(input.horizontal) > .12 ? Math.sign(input.horizontal) : 0;
+  if (heldDirection && heldDirection === player.horizontalHoldDirection) player.horizontalHoldFrames = Math.min(120, (player.horizontalHoldFrames || 0) + 1);
+  else {
+    player.horizontalHoldDirection = heldDirection;
+    player.horizontalHoldFrames = heldDirection ? 1 : 0;
+  }
   if (canGroundMove || canAirDrift) {
     if (canGroundMove && input.horizontal < -.8 && pressed(input, previous, BUTTONS.LEFT)) {
       if (player.grounded && (player.dashFrames > 0 || world.tick - player.lastTapLeft <= 8)) {
@@ -1329,21 +1595,27 @@ function updatePlayer(world, player, rawInput) {
     }
     if (canGroundMove) {
       const magnitude = Math.abs(input.horizontal);
-      const groundSpeed = player.dashFrames > 0 ? 470 : magnitude < .8 ? 220 : 290;
+      const running = player.horizontalHoldFrames >= 10;
+      const groundSpeed = player.dashFrames > 0 ? 470 : magnitude < .8 || !running ? 220 : 315;
       const crouching = input.vertical > .55 && magnitude < .25 && !bit(input.buttons, BUTTONS.SHIELD);
-      const targetVx = crouching ? 0 : magnitude > .12 ? input.horizontal * groundSpeed * character.speed : 0;
+      const crawling = !!character.canCrawl && input.vertical > .55 && magnitude >= .25 && !bit(input.buttons, BUTTONS.SHIELD);
+      const targetVx = crouching ? 0 : crawling ? input.horizontal * 112 * character.speed : magnitude > .12 ? input.horizontal * groundSpeed * character.speed : 0;
       const control = targetVx === 0 ? 145 : Math.sign(targetVx) !== Math.sign(player.vx) ? 175 : player.dashFrames > 0 ? 125 : 52;
       player.vx = approach(player.vx, targetVx, control);
       if (crouching) player.actionName = 'crouch';
+      else if (crawling) player.actionName = 'crawl';
       if (player.skidFrames > 0) { player.skidFrames -= 1; player.vx *= .88; }
     } else if (canAirDrift) {
-      const targetVx = Math.abs(input.horizontal) > .12 ? input.horizontal * 345 * character.air : player.vx;
-      const airControl = Math.sign(targetVx) !== Math.sign(player.vx) ? 34 : 24;
+      const freefallControl = player.freefall ? .38 : 1;
+      const targetVx = Math.abs(input.horizontal) > .12 ? input.horizontal * (player.freefall ? 255 : 345) * character.air : player.vx;
+      const airControl = (Math.sign(targetVx) !== Math.sign(player.vx) ? 34 : 24) * freefallControl;
       const recoveryControl = player.action?.move?.recoveryDrift ? player.action.move.recoveryDriftControl || 1 : 1;
       player.vx = approach(player.vx, targetVx, airControl * character.air * recoveryControl);
     }
     player.vx = clamp(player.vx, -500 * character.speed, 500 * character.speed);
-    if (!player.action && player.jumpBuffer > 0 && player.jumps > 0 && (player.grounded || player.coyoteFrames > 0 || player.jumps < 2)) {
+    if (!player.action && player.jumpBuffer > 0 && !player.grounded && tryFootstool(world, player)) {
+      player.coyoteFrames = 0;
+    } else if (!player.action && player.jumpBuffer > 0 && player.jumps > 0 && (player.grounded || player.coyoteFrames > 0 || player.jumps < 2)) {
       if (player.grounded) beginJumpSquat(player);
       else {
         const doubleJump = player.coyoteFrames === 0 && player.jumps === 1;
@@ -1355,8 +1627,13 @@ function updatePlayer(world, player, rawInput) {
       }
     }
   }
-  const fastFallAllowed = movementUnlocked && !player.grounded && (!player.action || !player.action.move.recoveryMove && !player.action.move.teleportY);
-  if (fastFallAllowed && input.vertical > 0.55 && player.vy > 0) player.fastFalling = true;
+  const fastFallAllowed = movementUnlocked && !player.grounded && !player.tumbling
+    && (!player.action || !player.action.move.recoveryMove && !player.action.move.teleportY);
+  if (fastFallAllowed && pressed(input, previous, BUTTONS.DOWN) && player.vy > 0 && !player.fastFalling) {
+    player.fastFalling = true;
+    player.fastFallFlashFrames = 8;
+    emit(world, 'fast-fall', { player: player.i, x: player.x, y: player.y - player.height / 2 });
+  }
   if (!player.grounded && player.shortHopFrames === 0 && !player.action?.move?.recoveryMove && released(input, previous, BUTTONS.UP) && player.vy < -220) player.vy *= .58;
   if (player.stun > 0) {
     const finisherFlight = player.criticalFlightFrames > 0;
@@ -1436,7 +1713,7 @@ function updatePlayer(world, player, rawInput) {
     const landingLag = currentLandingLag(player);
     player.y = landing.y - player.height / 2; player.vy = 0; player.grounded = true; player.platformId = landing.id;
     if (wasAirborne) player.vx *= landingLag ? .84 : .88;
-    player.jumps = 2; player.coyoteFrames = 6; player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false; player.criticalFlightFrames = 0; player.canLedgeInvincible = true; player.ledgeGrabs = 0;
+    player.jumps = 2; player.coyoteFrames = 6; player.airDodgeAvailable = true; player.recoveryAvailable = true; player.fastFalling = false; player.freefall = false; player.criticalFlightFrames = 0; player.canLedgeInvincible = true; player.ledgeGrabs = 0; player.footstoolCount = 0;
     if (wasAirborne && player.actionName === 'airDodge') {
       const neutralAirDodge = !!player.dodgeNeutral;
       player.dodgeFrames = 0; player.dodgeTotalFrames = 0; player.dodgeElapsed = 0;
@@ -1445,17 +1722,20 @@ function updatePlayer(world, player, rawInput) {
       player.vx *= neutralAirDodge ? .84 : .68; player.actionName = 'landing';
     } else if (wasAirborne && player.tumbling && landingSpeed > 120) {
       player.action = null; player.actionBuffer = null; player.stun = 0; player.pendingLandingLag = 0; player.tumbling = false;
-      if (player.techWindow > 0) {
+      const impactSpeed = Math.hypot(player.vx, landingSpeed);
+      const techable = impactSpeed <= TECH_MAX_IMPACT_SPEED;
+      if (player.techWindow > 0 && techable) {
         const direction = Math.abs(input.horizontal) > 0.4 ? Math.sign(input.horizontal) : 0;
+        const incomingVx = player.vx;
         player.techWindow = 0;
-        if (direction) performDodge(player, 'techRoll', 16, 12, direction * 470 * character.speed);
-        else { player.dodgeFrames = 10; player.invincible = Math.max(player.invincible, 14); player.vx *= 0.18; }
+        if (direction) performDodge(player, 'techRoll', 16, 12, direction * 470 * character.speed + incomingVx * .2);
+        else { player.dodgeFrames = 10; player.invincible = Math.max(player.invincible, 14); player.vx *= 0.32; }
         if (direction) player.face = direction;
         if (!direction) player.actionName = 'tech';
-        emit(world, 'tech', { player: player.i, direction, x: player.x, y: landing.y });
+        emit(world, 'tech', { player: player.i, direction, x: player.x, y: landing.y, impactSpeed, color: 'blue' });
       } else {
         player.knockdownFrames = 45; player.techWindow = 0; player.vx *= 0.28; player.actionName = 'knockdown';
-        emit(world, 'knockdown', { player: player.i, x: player.x, y: landing.y });
+        emit(world, 'knockdown', { player: player.i, x: player.x, y: landing.y, impactSpeed, techable, color: techable ? 'blue' : 'red' });
       }
     } else if (wasAirborne && landingLag) { player.landingLag = landingLag; player.pendingLandingLag = 0; player.action = null; player.actionName = 'landing'; }
     else if (wasAirborne && landingSpeed > 160 && player.dodgeFrames === 0) { player.landingLag = landingSpeed > 520 ? 6 : 4; player.actionName = 'landing'; }
@@ -1463,38 +1743,63 @@ function updatePlayer(world, player, rawInput) {
   } else { player.grounded = false; player.platformId = null; tryLedge(world, player); }
 
   if (!player.action && player.jumpSquatFrames === 0 && player.stun === 0 && player.dodgeFrames === 0 && player.landingLag === 0 && player.shieldStun === 0 && player.shieldDropLag === 0 && player.knockdownFrames === 0 && !player.shielding && !player.ledge && player.grabbing == null && player.grabbedBy == null) {
-    if (!player.grounded && player.tumbleRecoverFrames > 0) player.actionName = 'airRecover';
+    if (!player.grounded && player.footstoolCooldown > 12) player.actionName = 'footstool';
+    else if (!player.grounded && player.tumbleRecoverFrames > 0) player.actionName = 'airRecover';
+    else if (!player.grounded && player.freefall) player.actionName = 'freefall';
+    else if (!player.grounded && player.tumbling) player.actionName = 'tumble';
     else if (!player.grounded) player.actionName = player.vy < 0 ? 'jump' : 'fall';
     else if (player.skidFrames > 0) player.actionName = 'skid';
     else if (Math.abs(player.vx) > 380) player.actionName = 'dash';
     else if (input.vertical > .55 && Math.abs(input.horizontal) < .25) player.actionName = 'crouch';
-    else if (Math.abs(player.vx) > 18) player.actionName = Math.abs(input.horizontal) < .8 ? 'walk' : 'run';
+    else if (player.actionName === 'crawl' && input.vertical > .55 && Math.abs(input.horizontal) >= .25) player.actionName = 'crawl';
+    else if (Math.abs(player.vx) > 18) player.actionName = player.horizontalHoldFrames < 10 || Math.abs(input.horizontal) < .8 ? 'walk' : 'run';
     else player.actionName = 'idle';
   }
 
+  const outsideCamera = player.x < 0 || player.x > WORLD_W || player.y < 0 || player.y > WORLD_H;
+  if (outsideCamera && !isOutOfBounds(player) && world.rules.mode !== 'training') {
+    player.offscreenDamageClock = (player.offscreenDamageClock || 0) + 1;
+    if (player.offscreenDamageClock >= TICK_RATE) {
+      player.offscreenDamageClock = 0; player.damage += 1;
+      emit(world, 'offscreen-damage', { player: player.i, damage: player.damage });
+    }
+  } else player.offscreenDamageClock = 0;
   if (isOutOfBounds(player)) knockout(world, player);
   player.lastInput = input;
 }
 
 function knockout(world, player) {
   const killer = world.players.find(other => other.i === player.lastDamager && other.i !== player.i);
+  const upperExit = player.y < BLAST_TOP;
+  const upperRoll = upperExit ? world.rng() : 1;
+  const koStyle = upperRoll < .35 ? 'star' : upperRoll < .7 ? 'screen' : 'blast';
+  const respawnDelay = koStyle === 'blast' ? 90 : 150;
   if (killer) { killer.kos += 1; killer.score += 1; }
   player.falls += 1; if (world.rules.mode === 'time') player.score -= 1;
-  emit(world, 'ko', { player: player.i, killer: killer?.i ?? null });
+  emit(world, 'ko', {
+    player: player.i,
+    killer: killer?.i ?? null,
+    style: koStyle,
+    x: player.x,
+    y: player.y,
+    characterId: player.characterId,
+    palette: player.palette
+  });
   releaseGrab(world, player);
   if (world.suddenDeath) {
     player.eliminated = true; player.stocks = 0; player.respawn = 0;
     const survivors = world.players.filter(other => !other.eliminated && other.i !== player.i);
     world.phase = 'ended'; world.winner = survivors[0]?.i ?? killer?.i ?? null;
-  } else if (world.rules.mode === 'time' || world.rules.mode === 'training') player.respawn = 90;
+  } else if (world.rules.mode === 'time' || world.rules.mode === 'training') player.respawn = respawnDelay;
   else {
     player.stocks -= 1;
     if (player.stocks <= 0) { player.stocks = 0; player.eliminated = true; }
-    else player.respawn = 90;
+    else player.respawn = respawnDelay;
   }
   player.x = -999; player.y = -999; player.vx = 0; player.vy = 0;
+  player.respawnPlatformFrames = 0;
   player.action = null; player.actionBuffer = null; player.shielding = false; player.ledge = null; player.dodgeFrames = 0;
-  player.tumbling = false; player.techWindow = 0; player.knockdownFrames = 0; player.criticalFlightFrames = 0;
+  player.tumbling = false; player.freefall = false; player.techWindow = 0; player.knockdownFrames = 0; player.criticalFlightFrames = 0;
 }
 
 function projectileClashPower(entity) {
@@ -1594,7 +1899,7 @@ function updateEntities(world) {
         damage: entity.damage, kx: entity.kx || 360, ky: entity.ky || 180,
         fixedKx: entity.fixedKx, fixedKy: entity.fixedKy,
         knockbackGrowth: entity.knockbackGrowth, groundedFlinch: entity.groundedFlinch,
-        hitstop: entity.hitstop ?? 6, hitstun: entity.hitstun,
+        hitstop: entity.hitstop ?? 6, hitstun: entity.hitstun, noFlinch: !!entity.noFlinch,
         contactX: entity.x + Math.cos(contactAngle) * radius,
         contactY: entity.y + Math.sin(contactAngle) * radius
       } : null;
@@ -1604,7 +1909,7 @@ function updateEntities(world) {
         if (entity.stunBonus) target.stun = Math.max(target.stun, entity.stunBonus);
         if (entity.kind === 'arc' && entity.chainRadius) {
           const chained = world.players.filter(other => other.i !== owner.i && other.i !== target.i && !other.eliminated && !entity.hitPlayers.includes(other.i) && Math.hypot(other.x - target.x, other.y - target.y) <= entity.chainRadius).sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0];
-          if (chained && hitPlayer(world, owner, chained, { damage: entity.damage * .65, kx: (entity.kx || 360) * .7, ky: (entity.ky || 180) * .7, hitstop: 4 }, Math.sign(chained.x - target.x || owner.face))) { entity.hitPlayers.push(chained.i); emit(world, 'chain', { player: chained.i, from: target.i, x: chained.x, y: chained.y }); }
+          if (chained && hitPlayer(world, owner, chained, { name: 'arcChain', damage: entity.damage * .65, kx: 0, ky: 0, hitstop: 2, noFlinch: true }, Math.sign(chained.x - target.x || owner.face))) { entity.hitPlayers.push(chained.i); emit(world, 'chain', { player: chained.i, from: target.i, x: chained.x, y: chained.y }); }
         }
         if (entity.splashRadius) {
           for (const other of world.players) {
@@ -1734,7 +2039,7 @@ function decideCpuRecovery(world, player, profile) {
     const roll = world.rng() < profile.defense * .35;
     return cpuInput(world, roll ? -player.face : 0, roll ? 0 : -1, roll ? BUTTONS.SHIELD : 0);
   }
-  if (player.stun > 0 || player.tumbling) {
+  if (player.stun > 0) {
     const landingSoon = player.vy > 0 && Math.abs(player.y - recovery.platform.y) < 100;
     return cpuInput(world, toward, 0, landingSoon && profile.accuracy > .7 ? BUTTONS.SHIELD : 0);
   }
@@ -1774,7 +2079,7 @@ function decideCpuInput(world, player, difficulty) {
     const away = -Math.sign(target.x - player.x || 1);
     return cpuInput(world, world.rng() < profile.defense ? away : 0, 0, BUTTONS.SHIELD);
   }
-  if (player.stun > 0 || player.tumbling) {
+  if (player.stun > 0) {
     const recovery = cpuRecoveryTarget(world, player);
     const towardStage = Math.sign(recovery.x - player.x);
     const tech = player.vy > 0 && Math.abs(player.y - recovery.platform.y) < 90 && profile.accuracy > .68;
@@ -1895,18 +2200,31 @@ function stepWorld(world, inputs = {}) {
     const input = supplied || (player.clientId?.startsWith('cpu:') ? decideCpuInput(world, player, world.training.cpu) : player.lastInput);
     resolvedInputs.set(player.i, input);
   }
-  // Arm every player's neutral shield tap before resolving attacks. This keeps
-  // same-tick parries fair regardless of roster/update order.
+  // Arm shield-release parries before resolving attacks. Ultimate-style parries
+  // require a shield to be held for at least three frames, then released during
+  // the five-frame drop window. The prepass keeps same-tick results roster-order
+  // independent.
   for (const player of world.players) {
     const input = resolvedInputs.get(player.i);
     const neutralShield = Math.abs(Number(input?.horizontal) || 0) <= .4 && Math.abs(Number(input?.vertical) || 0) <= .4;
-    const canParry = player.grounded && neutralShield && pressed(input || {}, player.lastInput, BUTTONS.SHIELD)
+    const startsShield = player.grounded && neutralShield && pressed(input || {}, player.lastInput, BUTTONS.SHIELD)
       && !player.shielding && !player.action && player.stun <= 0 && player.hitstop <= 0
       && player.dodgeFrames <= 0 && player.landingLag <= 0 && player.shieldStun <= 0
       && player.shieldDropLag <= 0 && player.shieldLock <= 0 && player.knockdownFrames <= 0
       && !player.ledge && player.grabbedBy == null && player.grabbing == null;
+    if (startsShield) {
+      player.shielding = true; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
+      player.actionName = 'shield';
+    }
+    const releasedShield = released(input || {}, player.lastInput, BUTTONS.SHIELD);
+    const canParry = player.grounded && player.shielding && player.shieldHoldFrames >= 3 && releasedShield
+      && !player.action && player.stun <= 0 && player.hitstop <= 0 && player.dodgeFrames <= 0
+      && player.landingLag <= 0 && player.shieldStun <= 0 && player.shieldLock <= 0
+      && player.knockdownFrames <= 0 && !player.ledge && player.grabbedBy == null && player.grabbing == null;
     if (canParry) {
       player.parryFrames = Math.max(player.parryFrames, PARRY_FRAMES + 1);
+      player.shielding = false; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
+      player.shieldDropLag = 11;
       player.actionName = 'parryReady';
       emit(world, 'parry-ready', { player: player.i });
     }
@@ -1950,7 +2268,7 @@ function publicSnapshot(world) {
       const actionPhase = !action ? null : action.charging ? 'charge' : action.frame < startup ? 'startup' : action.frame < startup + action.move.active ? 'active' : 'recovery';
       const phaseStart = !action ? 0 : actionPhase === 'startup' || actionPhase === 'charge' ? 0 : actionPhase === 'active' ? startup : startup + action.move.active;
       const phaseLength = !action ? 1 : actionPhase === 'charge' ? 90 : actionPhase === 'startup' ? Math.max(1, startup) : actionPhase === 'active' ? Math.max(1, action.move.active) : Math.max(1, action.move.recovery);
-      const phaseProgress = action ? actionPhase === 'charge' ? action.holdFrames / 90 : clamp((action.frame - phaseStart) / phaseLength, 0, 1) : 0;
+      const phaseProgress = action ? actionPhase === 'charge' ? action.holdFrames / SMASH_MAX_HOLD_FRAMES : clamp((action.frame - phaseStart) / phaseLength, 0, 1) : 0;
       const actionHitbox = action && actionPhase === 'active'
         ? action.name === 'grab'
           ? grabHitbox(player)
@@ -1966,6 +2284,7 @@ function publicSnapshot(world) {
         actionPhase,
         actionVariant: action?.variant || null,
         actionMotion: action?.move?.motion || null,
+        actionAngleShift: action?.move?.angleShift || 0,
         actionTiming: action ? { startup, active: action.move.active, recovery: action.move.recovery } : null,
         phaseProgress,
         actionHitbox,
@@ -2011,6 +2330,7 @@ function trainingCommand(world, command) {
     bot.pendingLandingLag = 0;
     bot.tumbling = false;
     bot.tumbleRecoverFrames = 0;
+    bot.freefall = false;
     bot.techWindow = 0;
     bot.knockdownFrames = 0;
     bot.criticalFlightFrames = 0;
@@ -2023,7 +2343,7 @@ function trainingCommand(world, command) {
     world.items = [];
     for (const player of world.players) {
       resetPlayerState(world, player, { x: 640 + (player.i - 0.5) * 160, y: 300, damage: player.i ? clamp(Number(command.damage) || 0, 0, 999) : 0 });
-      player.respawn = 0; player.shield = 100; player.heldItem = null; player.ultimateMeter = ULTIMATE_READY;
+      player.respawn = 0; player.shield = SHIELD_MAX; player.heldItem = null; player.ultimateMeter = ULTIMATE_READY;
     }
   } else {
     return false;

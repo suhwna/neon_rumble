@@ -13,7 +13,7 @@
 
       <section id="menu" class="overlay">
         <div class="menu-card">
-          <div class="eyebrow"><span></span> ONLINE BATTLE ARENA</div>
+          <div class="eyebrow"><span></span> ONLINE BATTLE ARENA <b id="app-version">VERSION 확인 중</b></div>
           <h1>NEON<br /><em>RUMBLE</em></h1>
 
           <div class="identity-bar">
@@ -148,7 +148,7 @@
               <p><kbd>↓</kbd><span>하강 중 빠른 낙하 · 반투명 발판 통과</span></p>
               <p><kbd>↑ + Z</kbd><span>동시 입력 시 숏홉 공중 공격</span></p>
               <p><kbd>Z</kbd><span>짧게 기본 공격 · 홀드하면 스매시 충전</span></p>
-              <p><kbd>X</kbd><span>필살기 · 방향키로 변화</span></p>
+              <p><kbd>X</kbd><span>필살기 · 중립/옆/위/아래 4방향</span></p>
               <p><kbd>V</kbd><span>지상 잡기 · 공중에서는 회피</span></p>
               <p><kbd>C</kbd><span>방어 · 지상/공중 회피 · 낙법</span></p>
             </div>
@@ -156,20 +156,39 @@
           <section>
             <h3>이동·공격</h3>
             <ul class="training-move-list">
-              <li><kbd>Z × 3</kbd><span><b>잽 연계</b> 빠른 3단 기본기</span></li>
-              <li><kbd>방향 → Z</kbd><span><b>틸트 공격</b> 방향을 먼저 누른 뒤 Z</span></li>
-              <li><kbd>Z 홀드</kbd><span><b>스매시 공격</b> 잠시 홀드해 충전, 놓아서 공격</span></li>
+              <li><kbd>Z × 3</kbd><span><b>잽(Jab)</b> 가장 빠르고 약한 3단 기본기. 근거리 탈출·피해 누적용</span></li>
+              <li><kbd>방향 → Z</kbd><span><b>강공격(Tilt)</b> 잽보다 강하고 길며, 스매시보다 빠르고 빈틈이 적음</span></li>
+              <li><kbd>↗/↘ + Z</kbd><span><b>공격 각도 조절</b> 옆 틸트·스매시의 타점과 발사 각도를 위아래로 변경</span></li>
+              <li><kbd>Z 홀드</kbd><span><b>스매시 공격</b> 최대 1.4배까지 충전. 최대치에서 자동 발동하며 빗나가면 빈틈이 큼</span></li>
               <li><kbd>방향 + Z 홀드</kbd><span><b>방향 스매시</b> 앞·위·아래 방향을 선택</span></li>
-              <li><kbd>공중 Z</kbd><span><b>공중기</b> 중립·앞·뒤·위·아래 5방향 공격</span></li>
+              <li><kbd>대시 중 Z</kbd><span><b>대시 공격</b> 전진 판정이 길지만 막히거나 빗나가면 반격에 취약</span></li>
+              <li><kbd>공중 Z</kbd><span><b>NAir</b> 빠르고 오래 남는 전신 판정. 근접 견제·탈출용</span></li>
+              <li><kbd>공중 앞 + Z</kbd><span><b>FAir</b> 전방 범위가 넓은 콤보 시작·연계용</span></li>
+              <li><kbd>공중 뒤 + Z</kbd><span><b>BAir</b> 바라보는 반대쪽을 치는 강한 마무리기</span></li>
+              <li><kbd>공중 위 + Z</kbd><span><b>UAir</b> 위의 상대를 띄워 연속 추격하는 대공기</span></li>
+              <li><kbd>공중 아래 + Z</kbd><span><b>DAir</b> 아래로 내려찍는 메테오. 강하지만 발동·착지 빈틈이 큼</span></li>
+              <li><kbd>X</kbd><span><b>Neutral Special</b> 캐릭터의 대표 필살기</span></li>
+              <li><kbd>←/→ + X</kbd><span><b>Side Special</b> 좌우 방향 필살기</span></li>
+              <li><kbd>↑ + X</kbd><span><b>Up Special</b> 공중에서 한 번만 쓰는 주 복귀기. 착지·절벽 잡기로 회복</span></li>
+              <li><kbd>↓ + X</kbd><span><b>Down Special</b> 카운터·설치·범위 제어 등 캐릭터 고유 기술</span></li>
+              <li><kbd>반대 방향 → X</kbd><span><b>B리버스</b> 반대 방향을 빠르게 튕긴 직후 중립 필살기로 관성과 방향 반전</span></li>
+              <li><kbd>X → 반대 방향</kbd><span><b>턴어라운드 필살기</b> 발동 직후 4프레임 안에 방향만 반전</span></li>
+              <li><kbd>Z + X</kbd><span><b>최종 필살기</b> 게이지 100%일 때 발동. 기존 조작 유지</span></li>
               <li><kbd>↑ 짧게</kbd><span><b>숏홉</b> 점프키를 빨리 놓아 낮게 점프</span></li>
+              <li><kbd>방향키 유지</kbd><span><b>걷기·달리기</b> 처음에는 걷고 계속 유지하면 달리기, 빠르게 두 번 입력하면 대시</span></li>
+              <li><kbd>BOLT ↘/↙</kbd><span><b>기어가기</b> 낮은 자세를 유지하며 천천히 전진</span></li>
+              <li><kbd>하강 중 ↓</kbd><span><b>급강하</b> 정점을 지난 뒤 새로 입력하면 빠르게 낙하하며 반짝임 표시</span></li>
+              <li><kbd>지상 ↓</kbd><span><b>앉기 내성</b> 앉은 상태로 피격되면 넉백이 85%로 감소</span></li>
               <li><kbd>반대 방향</kbd><span><b>급정지</b> 대시 중 반대로 꺾어 제동·방향 전환</span></li>
             </ul>
           </section>
           <section>
             <h3>방어·회피</h3>
             <ul class="training-move-list">
-              <li><kbd>C 유지</kbd><span><b>실드</b> 공격을 막지만 내구도가 0이면 실드 브레이크</span></li>
-              <li><kbd>공격 직전 C 탭</kbd><span><b>패링</b> 누른 직후 5프레임에 공격을 받아 공격자를 정지</span></li>
+              <li><kbd>C 유지</kbd><span><b>실드</b> 내구도 50. 공격을 막을수록 작아지고 0이면 실드 브레이크</span></li>
+              <li><kbd>C 유지 → 피격 직전 해제</kbd><span><b>패링</b> 실드를 잠깐 유지한 뒤 놓은 직후 5프레임에 공격을 받아 공격자를 정지</span></li>
+              <li><kbd>C + X 유지 + 방향</kbd><span><b>실드 시프트</b> 실드 중심을 옮겨 노출된 신체를 보호</span></li>
+              <li><kbd>C 중 ↑ + Z / X</kbd><span><b>실드 캔슬</b> 위 스매시 또는 위 필살기로 바로 반격</span></li>
               <li><kbd>←/→ + C</kbd><span><b>구르기</b> 이동하며 상대를 통과하는 지상 회피</span></li>
               <li><kbd>↓ + C</kbd><span><b>제자리 회피</b> 막판에는 Z/X로 바로 반격 가능</span></li>
               <li><kbd>공중 C</kbd><span><b>공중 회피</b> 중립은 관성 유지, 방향 입력 시 방향 회피</span></li>
@@ -179,27 +198,48 @@
             <p class="training-note">공중 회피는 한 번만 가능하며 착지·절벽 잡기 후 회복됩니다. 회피를 연속 사용하면 무적은 짧아지고 후딜은 늘어납니다.</p>
           </section>
           <section>
+            <h3>피격 상태</h3>
+            <ul class="training-move-list">
+              <li><kbd>타격 순간</kbd><span><b>히트랙</b> 공격자와 피격자가 함께 잠깐 정지해 타격을 확인</span></li>
+              <li><kbd>히트스턴 중</kbd><span><b>행동 불가</b> 넉백 방향 조절과 히트랙 중 SDI만 가능</span></li>
+              <li><kbd>히트스턴 종료</kbd><span><b>자유낙하</b> 공중 점프·공중기·공중 회피로 탈출 가능. 행동 전에는 급강하 불가</span></li>
+              <li><kbd>위 X 종료</kbd><span><b>무방비</b> 어두워진 채 약한 방향 조절과 급강하만 가능. BOLT 스프링은 예외</span></li>
+              <li><kbd>무방비 중 피격</kbd><span><b>복귀기 회복</b> 공중 점프는 소모된 채 위 필살기를 다시 사용할 수 있음</span></li>
+              <li><kbd>하얀 점멸</kbd><span><b>무적</b> 타격·잡기·아머 파괴를 포함한 모든 공격을 무시</span></li>
+            </ul>
+            <p class="training-note">BLAZE의 브레이커 러시는 9 이하 피해만 버티는 헤비아머입니다. 슈퍼아머는 피해량과 관계없이 경직·넉백을 무시하지만 피해 자체는 받습니다.</p>
+          </section>
+          <section>
             <h3>잡기·기상</h3>
             <ul class="training-move-list">
               <li><kbd>V</kbd><span><b>잡기</b> 실드 중 Z로도 잡기 가능</span></li>
-              <li><kbd>잡은 뒤 Z</kbd><span><b>잡기 타격</b> 짧게 때려 피해를 누적</span></li>
-              <li><kbd>잡은 뒤 방향</kbd><span><b>던지기</b> 앞·뒤·위·아래 네 방향 던지기</span></li>
+              <li><kbd>대시 중 V</kbd><span><b>대시 잡기</b> 발동은 느리지만 전진 거리와 잡기 범위가 증가</span></li>
+              <li><kbd>잡은 뒤 Z/V</kbd><span><b>잡기 타격</b> 짧게 때려 피해를 누적. 욕심내면 상대가 탈출</span></li>
+              <li><kbd>잡은 뒤 앞</kbd><span><b>앞 던지기</b> 가장 약하지만 상대를 절벽 쪽으로 밀어냄</span></li>
+              <li><kbd>잡은 뒤 뒤</kbd><span><b>뒤 던지기</b> 가장 강한 넉백을 가진 마무리용 던지기</span></li>
+              <li><kbd>잡은 뒤 위</kbd><span><b>위 던지기</b> 상대를 띄워 공중 추격을 시작</span></li>
+              <li><kbd>잡은 뒤 아래</kbd><span><b>아래 던지기</b> 낮게 띄워 지상·공중 콤보로 연계</span></li>
               <li><kbd>잡혔을 때 연타</kbd><span><b>잡기 탈출</b> 방향키와 Z/X/V/C를 빠르게 입력</span></li>
               <li><kbd>다운 중 ←/→</kbd><span><b>기상 구르기</b> 입력 방향으로 무적 이동</span></li>
               <li><kbd>다운 중 Z</kbd><span><b>기상 공격</b> 공격하며 일어나기</span></li>
               <li><kbd>다운 중 ↑/C</kbd><span><b>제자리 기상</b> 짧은 무적과 함께 일어나기</span></li>
+              <li><kbd>실드 브레이크 중 연타</kbd><span><b>매시</b> 방향·공격 버튼을 빠르게 바꿔 기절 시간을 단축</span></li>
             </ul>
           </section>
           <section>
             <h3>절벽·복귀</h3>
             <ul class="training-move-list">
               <li><kbd>절벽 ↑</kbd><span><b>절벽 점프</b> 위로 뛰어 복귀</span></li>
-              <li><kbd>절벽 Z</kbd><span><b>절벽 공격</b> 올라오며 공격</span></li>
-              <li><kbd>절벽 C/안쪽</kbd><span><b>절벽 구르기</b> 무적으로 안쪽까지 이동</span></li>
-              <li><kbd>절벽 ↓</kbd><span><b>절벽 놓기</b> 매달리기를 취소하고 낙하</span></li>
+              <li><kbd>절벽 Z/X</kbd><span><b>절벽 공격</b> 올라오며 공격</span></li>
+              <li><kbd>절벽 C/V</kbd><span><b>절벽 구르기</b> 전반부 무적으로 안쪽까지 이동</span></li>
+              <li><kbd>절벽 안쪽</kbd><span><b>빠른 올라오기</b> 가장 짧은 빈틈으로 지상 복귀</span></li>
+              <li><kbd>절벽 바깥쪽/↓</kbd><span><b>절벽 놓기</b> 바깥쪽은 놓기, 아래는 급강하하며 놓기</span></li>
               <li><kbd>날아갈 때 방향</kbd><span><b>DI·공중 제어</b> 날아가는 각도와 감속 방향을 조절</span></li>
+              <li><kbd>상대 머리 위에서 ↑</kbd><span><b>풋스툴</b> 상대를 밟아 튕기며 공중 점프를 보존</span></li>
+              <li><kbd>상대가 잡은 절벽 잡기</kbd><span><b>절벽 트럼프</b> 먼저 매달린 상대를 밀어내고 절벽 차지</span></li>
               <li><kbd>피격 정지 중 방향</kbd><span><b>SDI</b> 강한 타격의 정지 순간에 위치를 미세 조절</span></li>
             </ul>
+            <p class="training-note">아이템이 없는 1대1은 피해량이 1.2배이며, 화면 밖에서 낙사선 안에 오래 머물면 초당 1% 피해를 받습니다. 상단 KO는 일정 확률로 별·스크린 KO가 발생해 재등장이 늦어집니다. 리스폰 발판에서는 최대 2초간 무적이며, 기다린 시간만큼 남은 무적 시간이 줄어듭니다.</p>
           </section>
           <section>
             <h3>캐릭터 필살기</h3>
