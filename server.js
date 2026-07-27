@@ -233,7 +233,8 @@ function startRoom(room) {
   if (room.rules.mode === 'training' && roster.length === 1) roster.push({ slot: 1, clientId: 'cpu:training', nickname: 'BOT', characterId: 'blaze', palette: 0, team: 1 });
   room.world = createWorld({ rules: room.rules, roster, seed: Date.now(), cpu: 'dummy' });
   room.warmupWorld = null;
-  room.world.countdown = countdownTicks;
+  room.world.phase = room.rules.mode === 'training' ? 'active' : 'countdown';
+  room.world.countdown = room.rules.mode === 'training' ? 0 : countdownTicks;
   room.playing = true; room.recorded = false;
   for (const slot of room.slots) room.inputs[slot.index] = emptyInput(slot.lastSeq);
   io.to(room.code).emit('match:start', { room: publicRoom(room), snapshot: publicSnapshot(room.world) }); emitRoom(room); return true;

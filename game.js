@@ -28,11 +28,13 @@ const trainingGuideToggle = document.querySelector('#training-guide-toggle');
 const trainingTutorial = document.querySelector('#training-tutorial');
 const trainingTutorialToggle = document.querySelector('#training-tutorial-toggle');
 const trainingFighterSelect = document.querySelector('#training-fighter-select');
+const trainingBotSelect = document.querySelector('#training-bot-select');
 const socket = io();
 
 const WORLD_W = 1280, WORLD_H = 720;
 let dpr = 1, viewScale = 1, viewOffsetX = 0, viewOffsetY = 0;
 let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], blastMarks = [];
+let ultimateCinematic = null;
 let state = 'menu', room = null, myIndex = -1, identity = null;
 let selectedCharacter = localStorage.getItem('neon_character') || 'volt';
 let selectedPalette = Number(localStorage.getItem('neon_palette') || 0);
@@ -80,6 +82,18 @@ const TRAINING_SPECIALS = {
     ['↑ + X', '워프 라이즈', '대각선 워프로 멀리 복귀'],
     ['↓ + X', '그래비티 필드', '적을 중심으로 끌어당기는 지속 장판']
   ]
+};
+const TRAINING_ULTIMATES = {
+  volt: ['천뢰 낙하', '전방 지점에 예고 후 강한 낙뢰. 표시 범위 밖으로 피할 수 있습니다.'],
+  blaze: ['브레이커 러시', '슈퍼아머 돌진을 직접 맞혀야 폭발적인 넉백이 발생합니다.'],
+  bolt: ['오버드라이브 오브', '전방으로 빠르게 관통하는 구체. 점프하거나 회피해 경로를 벗어날 수 있습니다.'],
+  nova: ['싱귤래리티', '중력으로 끌어당긴 뒤 폭발. 중심에서 벗어나면 피할 수 있습니다.']
+};
+const ULTIMATE_TITLES = {
+  volt: ['THUNDER VERDICT', '천뢰 낙하'],
+  blaze: ['BREAKER RUSH', '브레이커 러시'],
+  bolt: ['OVERDRIVE ORB', '오버드라이브 오브'],
+  nova: ['SINGULARITY', '싱귤래리티']
 };
 
 const TUTORIAL_STEPS = [
@@ -201,10 +215,11 @@ function setTrainingGuideOpen(open) {
 
 function renderTrainingGuide(characterId = selectedCharacter) {
   const fighter = FIGHTERS.find(item => item.id === characterId) || FIGHTERS[0];
+  const ultimate = TRAINING_ULTIMATES[fighter.id];
   document.querySelector('#training-guide-fighter').textContent = fighter.name;
   document.querySelector('#training-guide-fighter').style.color = fighter.color;
   document.querySelector('#training-guide-role').textContent = fighter.archetype;
-  document.querySelector('#training-special-list').innerHTML = (TRAINING_SPECIALS[fighter.id] || []).map(([input, name, description]) =>
+  document.querySelector('#training-special-list').innerHTML = [...(TRAINING_SPECIALS[fighter.id] || []), ['Z + X', ultimate[0], ultimate[1]]].map(([input, name, description]) =>
     `<li><kbd>${input}</kbd><span><b>${name}</b>${description}</span></li>`
   ).join('');
 }
@@ -329,7 +344,7 @@ function restoreMainUi() {
 function beginWarmup(snapshot) {
   if (!snapshot) return;
   state = 'waiting';
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; localCue = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
@@ -338,7 +353,7 @@ async function leaveRoomToMenu() {
   releaseAllInputs();
   await emitAck('room:leave');
   state = 'menu'; room = null; myIndex = -1;
-  players = []; snapshots = []; latestSnapshot = null; localCue = null;
+  players = []; snapshots = []; latestSnapshot = null; localCue = null; ultimateCinematic = null;
   particles = []; trails = []; impactRings = []; blastMarks = [];
   paused = false; hitboxes = false;
   closeTutorial(); setTrainingGuideOpen(false); resetTrainingInputHistory();
@@ -579,14 +594,16 @@ function beginMatch(snapshot) {
   trainingPanel.classList.toggle('hidden', snapshot.rules.mode !== 'training');
   if (snapshot.rules.mode === 'training') {
     const trainingPlayer = snapshot.players.find(player => player.i === myIndex) || snapshot.players[0];
+    const trainingBot = snapshot.players.find(player => String(player.clientId || '').startsWith('cpu:'));
     selectedCharacter = trainingPlayer?.characterId || selectedCharacter;
     trainingFighterSelect.value = selectedCharacter;
+    if (trainingBot) trainingBotSelect.value = trainingBot.characterId;
     renderTrainingGuide(selectedCharacter);
     resetTrainingInputHistory();
     closeTutorial();
     setTrainingGuideOpen(false);
   }
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; localCue = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
@@ -596,6 +613,10 @@ function receiveSnapshot(snapshot) {
   const buffered = { receivedAt: performance.now(), data: snapshot };
   snapshots.push(buffered); if (snapshots.length > 30) snapshots.shift(); latestSnapshot = buffered;
   rules = snapshot.rules; stage = STAGES.find(item => item.id === snapshot.stage.id) || STAGES[0]; remainingTicks = snapshot.remainingTicks;
+  if (snapshot.rules.mode === 'training') {
+    const trainingBot = snapshot.players.find(player => String(player.clientId || '').startsWith('cpu:'));
+    if (trainingBot && trainingBotSelect.value !== trainingBot.characterId) trainingBotSelect.value = trainingBot.characterId;
+  }
   processEvents(snapshot.events || []);
   if (snapshot.phase === 'countdown') { countdown.textContent = Math.max(1, Math.ceil(snapshot.countdown / 60)); countdown.classList.remove('hidden'); }
   else countdown.classList.add('hidden');
@@ -610,16 +631,17 @@ function processEvents(events) {
       const player = players.find(item => item.i === (pummel ? event.target : event.player));
       const attacker = players.find(item => item.i === (pummel ? event.player : event.attacker));
       const hitX = event.x ?? player?.x, hitY = event.y ?? player?.y;
-      const sweet = event.quality === 'sweet', critical = event.type === 'hit' && event.critical;
+      const sweet = event.quality === 'sweet', critical = event.type === 'hit' && event.critical, ultimate = !!event.ultimate;
       const impactColor = event.type === 'parry' ? '#fff36b' : event.type === 'shield-hit' ? '#79efff' : event.color || '#ffffff';
       const impactStrength = pummel ? .42 : clamp((event.launchSpeed || (event.power || 4) * 55) / 500, .4, 1.55);
       const impactAngle = Number.isFinite(event.launchAngle)
         ? event.launchAngle
         : Math.atan2((player?.y || 0) - (attacker?.y || 0), (player?.x || 0) - (attacker?.x || 0));
       if (Number.isFinite(hitX) && Number.isFinite(hitY)) {
-        const particleCount = event.type === 'parry' ? 28 : critical ? 30 : sweet ? 22 : event.type === 'shield-hit' ? 13 : pummel ? 9 : 16;
-        const particleSpeed = 145 + impactStrength * (critical ? 215 : 135);
-        burst(hitX, hitY, impactColor, particleCount, particleSpeed, impactAngle, critical ? 1.8 : sweet ? 1.45 : pummel ? .88 : 1.22);
+        const particleCount = ultimate ? 44 : event.type === 'parry' ? 28 : critical ? 30 : sweet ? 22 : event.type === 'shield-hit' ? 13 : pummel ? 9 : 16;
+        const particleSpeed = ultimate ? 520 : 145 + impactStrength * (critical ? 215 : 135);
+        burst(hitX, hitY, impactColor, particleCount, particleSpeed, impactAngle, ultimate ? 2.05 : critical ? 1.8 : sweet ? 1.45 : pummel ? .88 : 1.22);
+        if (ultimate) burst(hitX, hitY, '#ffffff', 24, 370, impactAngle + Math.PI, 1.45);
         if (event.type === 'parry' || event.type === 'shield-hit') {
           const ringDuration = event.type === 'parry' ? .32 : .23;
           impactRings.push({
@@ -633,10 +655,10 @@ function processEvents(events) {
         }
       }
       if (player) player.flashUntil = performance.now() + (event.type === 'parry' ? 190 : critical ? 240 : sweet ? 180 : pummel ? 100 : 145);
-      screenShake = Math.max(screenShake, event.type === 'parry' ? 12 : critical ? 17 : 3 + impactStrength * 4.5 + (sweet ? 2 : 0));
-      cameraPunch = Math.max(cameraPunch, event.type === 'parry' ? .075 : critical ? .12 : Math.min(.078, .012 + impactStrength * .045));
-      if (critical) criticalFlash = 1;
-      beep(event.type === 'parry' ? 620 : critical ? 58 : pummel ? 155 : 110, critical ? .15 : pummel ? .035 : .06, event.type === 'parry' ? 'square' : 'sawtooth');
+      screenShake = Math.max(screenShake, ultimate ? 22 : event.type === 'parry' ? 12 : critical ? 17 : 3 + impactStrength * 4.5 + (sweet ? 2 : 0));
+      cameraPunch = Math.max(cameraPunch, ultimate ? .145 : event.type === 'parry' ? .075 : critical ? .12 : Math.min(.078, .012 + impactStrength * .045));
+      if (critical || ultimate) criticalFlash = 1;
+      beep(ultimate ? 48 : event.type === 'parry' ? 620 : critical ? 58 : pummel ? 155 : 110, ultimate ? .22 : critical ? .15 : pummel ? .035 : .06, event.type === 'parry' ? 'square' : 'sawtooth');
     }
     if (event.type === 'counter') {
       const defender = players.find(item => item.i === event.player);
@@ -654,6 +676,19 @@ function processEvents(events) {
       criticalFlash = Math.max(criticalFlash, .7);
       beep(72, .12, 'square');
     }
+    if (event.type === 'ultimate-start') {
+      const player = players.find(item => item.i === event.player);
+      if (player) player.flashUntil = performance.now() + 360;
+      ultimateCinematic = {
+        player: event.player, fighter: event.fighter,
+        color: player ? (FIGHTERS.find(item => item.id === player.characterId)?.palettes?.[player.palette % 4] || '#ffffff') : '#ffffff',
+        started: performance.now(), duration: 820
+      };
+      screenShake = Math.max(screenShake, 9);
+      cameraPunch = Math.max(cameraPunch, .065);
+      beep(72, .2, 'square');
+    }
+    if (event.type === 'ultimate-cancel' && ultimateCinematic?.player === event.player) ultimateCinematic.duration = Math.min(ultimateCinematic.duration, performance.now() - ultimateCinematic.started + 120);
     if (event.type === 'ko') { screenShake = 18; cameraPunch = .11; beep(60, .2, 'sawtooth'); }
     if (event.type === 'land') { screenShake = Math.max(screenShake, 1); beep(72, .025, 'sine'); }
     if (event.type === 'tech') beep(720, .055, 'square');
@@ -678,7 +713,7 @@ function processEvents(events) {
 }
 
 function copyState(target, source) {
-  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeGrabs','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','stun','hitstop','landingLag','tumbling','tumbleRecoverFrames','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','dashFrames','jumpSquatFrames','eliminated','respawn','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
+  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeGrabs','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','ultimateMeter','stun','hitstop','landingLag','tumbling','tumbleRecoverFrames','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','dashFrames','jumpSquatFrames','eliminated','respawn','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
 }
 function lerp(a, b, amount) { return a + (b - a) * amount; }
 function actionPhaseFrames(player, phase = player.actionPhase, actionName = player.actionName) {
@@ -811,7 +846,33 @@ function draw(dt) {
     ctx.fillRect(0, 0, WORLD_W, WORLD_H);
     ctx.restore();
   }
+  drawUltimateCinematic();
   if (state === 'playing' || state === 'waiting') drawBattleHUD();
+}
+
+function drawUltimateCinematic() {
+  if (!ultimateCinematic) return;
+  const age = performance.now() - ultimateCinematic.started;
+  if (age >= ultimateCinematic.duration) { ultimateCinematic = null; return; }
+  const intro = clamp(age / 130, 0, 1), outro = clamp((ultimateCinematic.duration - age) / 180, 0, 1);
+  const alpha = Math.min(intro, outro), slide = (1 - intro) * 150;
+  const fighter = FIGHTERS.find(item => item.id === ultimateCinematic.fighter) || FIGHTERS[0];
+  const [english, korean] = ULTIMATE_TITLES[fighter.id] || ['ULTIMATE', '궁극기'];
+  ctx.save();
+  ctx.globalAlpha = alpha * .24;
+  ctx.fillStyle = '#02040b'; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  ctx.globalAlpha = alpha * .94;
+  ctx.fillStyle = 'rgba(4,7,16,.92)';
+  ctx.beginPath();ctx.moveTo(-40,54);ctx.lineTo(820-slide,54);ctx.lineTo(760-slide,132);ctx.lineTo(-40,132);ctx.closePath();ctx.fill();
+  ctx.fillStyle = ultimateCinematic.color;ctx.fillRect(0,54,12,78);
+  ctx.fillRect(26,112,620-slide,4);
+  ctx.globalAlpha = alpha * .22;ctx.fillStyle = ultimateCinematic.color;
+  for(let index=0;index<7;index++)ctx.fillRect(40+index*92-slide*.3,63,54,2);
+  ctx.globalAlpha = alpha;
+  ctx.textAlign='left';ctx.fillStyle='#ffffff';ctx.font='900 31px Inter';ctx.fillText(english,42-slide*.18,92);
+  ctx.fillStyle=ultimateCinematic.color;ctx.font='900 13px Inter';ctx.fillText(`${fighter.name}  //  ${korean}`,44-slide*.12,117);
+  ctx.textAlign='right';ctx.globalAlpha=alpha*.62;ctx.fillStyle='#ffffff';ctx.font='900 11px Inter';ctx.fillText('Z + X',742-slide,118);
+  ctx.restore();
 }
 
 function drawBackground() {
@@ -903,7 +964,27 @@ function drawEntities(){
   const now=performance.now();
   for(const e of entities){
     const color=e.color||'#fff',spin=now/180*(e.returning?-1:1);ctx.save();ctx.translate(e.x,e.y);ctx.shadowBlur=18;ctx.shadowColor=color;ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineCap='round';
-    if(e.kind==='gravity'){
+    if(e.kind==='ultimateVolt'){
+      const armed=e.arm<=0,r=e.radius||86,flicker=.82+Math.sin(now*.09)*.18;ctx.globalAlpha=armed?.98:.34*flicker;
+      if(armed){
+        for(let bolt=-2;bolt<=2;bolt++){ctx.strokeStyle=bolt===0?'#ffffff':color;ctx.lineWidth=bolt===0?13:5;ctx.beginPath();ctx.moveTo(bolt*17,-300);ctx.lineTo(bolt*7-12,-220);ctx.lineTo(bolt*13+9,-142);ctx.lineTo(bolt*4-7,-62);ctx.lineTo(bolt*11,38);ctx.stroke();}
+        ctx.globalAlpha=.82;ctx.lineWidth=4;for(let spark=-3;spark<=3;spark++){ctx.beginPath();ctx.moveTo(0,35);ctx.lineTo(spark*28,52+Math.abs(spark)*7);ctx.stroke();}
+      }else{
+        ctx.setLineDash([13,11]);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-r*.48,-245);ctx.lineTo(-r*.48,47);ctx.moveTo(r*.48,-245);ctx.lineTo(r*.48,47);ctx.stroke();ctx.setLineDash([]);
+        const bracket=24;ctx.lineWidth=4;for(const sx of [-1,1])for(const sy of [-1,1]){ctx.beginPath();ctx.moveTo(sx*r,34+sy*r*.22);ctx.lineTo(sx*(r-bracket),34+sy*r*.22);ctx.moveTo(sx*r,34+sy*r*.22);ctx.lineTo(sx*r,34+sy*(r*.22-bracket*.35));ctx.stroke();}
+        ctx.globalAlpha=.7*flicker;ctx.fillStyle='#ffffff';ctx.fillRect(-3,-190,6,226);
+      }
+    }else if(e.kind==='ultimateNova'){
+      const armed=e.arm<=0,r=e.radius||165,collapse=armed?.12:clamp((e.arm||0)/24,0,1);ctx.globalAlpha=armed?.96:.42;ctx.lineWidth=armed?6:2.5;
+      for(let spoke=0;spoke<12;spoke++){const a=spoke*Math.PI/6+now*.00018,outer=r*(.78+.15*Math.sin(now*.002+spoke)),inner=18+collapse*38;ctx.beginPath();ctx.moveTo(Math.cos(a)*outer,Math.sin(a)*outer);ctx.lineTo(Math.cos(a+.11)*inner,Math.sin(a+.11)*inner);ctx.stroke();}
+      for(let mote=0;mote<18;mote++){const a=mote*2.399+now*.00012,travel=((now*.00055+mote*.071)%1),distance=18+(r-18)*(1-travel);ctx.globalAlpha=(armed?.9:.55)*(1-travel*.45);ctx.fillStyle=mote%4===0?'#ffffff':color;ctx.fillRect(Math.cos(a)*distance-2,Math.sin(a)*distance-2,4,4);}
+      ctx.rotate(now*.0012);ctx.globalAlpha=armed?1:.75;ctx.fillStyle=armed?'#ffffff':'#05030d';ctx.strokeStyle=color;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(0,-24);ctx.lineTo(24,0);ctx.lineTo(0,24);ctx.lineTo(-24,0);ctx.closePath();ctx.fill();ctx.stroke();
+    }else if(e.kind==='ultimateBolt'){
+      const r=e.radius||42;ctx.rotate(Math.atan2(e.vy||0,e.vx||1));
+      for(let streak=0;streak<5;streak++){ctx.globalAlpha=.16+streak*.11;ctx.strokeStyle=streak===4?'#ffffff':color;ctx.lineWidth=2+streak*2;ctx.beginPath();ctx.moveTo(-r*(4.8-streak*.55),(streak-2)*8);ctx.lineTo(r*.42,(streak-2)*3);ctx.stroke();}
+      ctx.rotate(spin*1.8);ctx.globalAlpha=.9;for(let blade=0;blade<4;blade++){ctx.rotate(Math.PI/2);ctx.fillStyle=blade%2?'#ffffff':color;ctx.beginPath();ctx.moveTo(8,-7);ctx.lineTo(r*1.18,0);ctx.lineTo(8,7);ctx.closePath();ctx.fill();}
+      ctx.fillStyle='#07101a';ctx.fillRect(-9,-9,18,18);
+    }else if(e.kind==='gravity'){
       const pulse=.92+Math.sin(now/140)*.08;ctx.globalAlpha=.12;ctx.fillStyle=color;ctx.beginPath();ctx.arc(0,0,e.radius*pulse,0,Math.PI*2);ctx.fill();ctx.globalAlpha=.75;ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,0,18,0,Math.PI*2);ctx.stroke();for(let i=0;i<3;i++){ctx.globalAlpha=.3;ctx.beginPath();ctx.arc(0,0,35+i*25+Math.sin(now/180+i)*7,0,Math.PI*2);ctx.stroke();}
     }else if(e.kind==='static'){
       ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-16,10);ctx.lineTo(-8,-8);ctx.lineTo(0,8);ctx.lineTo(9,-11);ctx.lineTo(17,9);ctx.stroke();ctx.globalAlpha=e.arm>0?.24:.72;
@@ -945,6 +1026,7 @@ function displayedAction(player) {
 }
 
 function actionLabel(name) {
+  if (name === 'ultimate') return 'ULTIMATE';
   if (name === 'grab') return 'GRAB';
   if (name === 'dashAttack') return 'DASH ATTACK';
   if (name === 'tech' || name === 'techRoll') return 'TECH';
@@ -965,112 +1047,112 @@ function motionCurve(phase, progress) {
 
 const BASE_KEY_POSE = Object.freeze({
   bodyX: 0, bodyY: 0, rotation: 0, scaleX: 1, scaleY: 1,
-  frontHandX: 22, frontHandY: -4, backHandX: -16, backHandY: 3,
-  frontFootX: 11, frontFootLift: 0, backFootX: -11, backFootLift: 0
+  frontHandX: 23, frontHandY: -5, backHandX: -18, backHandY: 2,
+  frontFootX: 14, frontFootLift: 0, backFootX: -14, backFootLift: 0
 });
 
 const LOOP_KEYFRAMES = Object.freeze({
   idle: [
-    { t: 0, bodyY: 0, frontHandY: -5, backHandY: 2 },
-    { t: .5, bodyY: -1.3, frontHandY: -7, backHandY: 1 },
-    { t: 1, bodyY: 0, frontHandY: -5, backHandY: 2 }
+    { t: 0, bodyX: 0, bodyY: 1, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 },
+    { t: .5, bodyX: -1, bodyY: -1, rotation: .006, frontHandX: 23, frontHandY: -9, backHandX: -18, backHandY: 0, frontFootX: 14, backFootX: -16 },
+    { t: 1, bodyX: 0, bodyY: 1, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   walk: [
-    { t: 0, bodyY: 0, rotation: .025, frontHandX: -10, frontHandY: -4, backHandX: 13, backHandY: -8, frontFootX: 18, frontFootLift: 0, backFootX: -15, backFootLift: 0 },
-    { t: .25, bodyY: -1.2, rotation: 0, frontHandX: 2, frontHandY: -7, backHandX: -1, backHandY: -7, frontFootX: 2, frontFootLift: 1, backFootX: -4, backFootLift: 4 },
-    { t: .5, bodyY: 0, rotation: -.025, frontHandX: 13, frontHandY: -8, backHandX: -10, backHandY: -4, frontFootX: -15, frontFootLift: 0, backFootX: 18, backFootLift: 0 },
-    { t: .75, bodyY: -1.2, rotation: 0, frontHandX: 2, frontHandY: -7, backHandX: -1, backHandY: -7, frontFootX: -4, frontFootLift: 4, backFootX: 2, backFootLift: 1 },
-    { t: 1, bodyY: 0, rotation: .025, frontHandX: -10, frontHandY: -4, backHandX: 13, backHandY: -8, frontFootX: 18, frontFootLift: 0, backFootX: -15, backFootLift: 0 }
+    { t: 0, bodyX: 1, bodyY: 0, rotation: .035, frontHandX: -17, frontHandY: -2, backHandX: 16, backHandY: -9, frontFootX: 21, frontFootLift: 0, backFootX: -18, backFootLift: 0 },
+    { t: .25, bodyX: 0, bodyY: -2, rotation: .015, frontHandX: -3, frontHandY: -5, backHandX: 4, backHandY: -8, frontFootX: 6, frontFootLift: 2, backFootX: -7, backFootLift: 7 },
+    { t: .5, bodyX: 1, bodyY: 0, rotation: -.015, frontHandX: 17, frontHandY: -9, backHandX: -16, backHandY: -2, frontFootX: -18, frontFootLift: 0, backFootX: 21, backFootLift: 0 },
+    { t: .75, bodyX: 0, bodyY: -2, rotation: .015, frontHandX: 4, frontHandY: -8, backHandX: -3, backHandY: -5, frontFootX: -7, frontFootLift: 7, backFootX: 6, backFootLift: 2 },
+    { t: 1, bodyX: 1, bodyY: 0, rotation: .035, frontHandX: -17, frontHandY: -2, backHandX: 16, backHandY: -9, frontFootX: 21, frontFootLift: 0, backFootX: -18, backFootLift: 0 }
   ],
   run: [
-    { t: 0, bodyY: 0, rotation: .08, frontHandX: -20, frontHandY: -2, backHandX: 20, backHandY: -12, frontFootX: 27, frontFootLift: 0, backFootX: -23, backFootLift: 0 },
-    { t: .25, bodyY: -3, rotation: .06, frontHandX: -4, frontHandY: -8, backHandX: 5, backHandY: -10, frontFootX: 5, frontFootLift: 2, backFootX: -7, backFootLift: 8 },
-    { t: .5, bodyY: 0, rotation: .08, frontHandX: 20, frontHandY: -12, backHandX: -20, backHandY: -2, frontFootX: -23, frontFootLift: 0, backFootX: 27, backFootLift: 0 },
-    { t: .75, bodyY: -3, rotation: .06, frontHandX: 5, frontHandY: -10, backHandX: -4, backHandY: -8, frontFootX: -7, frontFootLift: 8, backFootX: 5, backFootLift: 2 },
-    { t: 1, bodyY: 0, rotation: .08, frontHandX: -20, frontHandY: -2, backHandX: 20, backHandY: -12, frontFootX: 27, frontFootLift: 0, backFootX: -23, backFootLift: 0 }
+    { t: 0, bodyX: 3, bodyY: 1, rotation: .11, frontHandX: -25, frontHandY: 1, backHandX: 23, backHandY: -14, frontFootX: 31, frontFootLift: 0, backFootX: -26, backFootLift: 0 },
+    { t: .25, bodyX: 2, bodyY: -4, rotation: .085, frontHandX: -7, frontHandY: -5, backHandX: 8, backHandY: -11, frontFootX: 7, frontFootLift: 3, backFootX: -9, backFootLift: 12 },
+    { t: .5, bodyX: 3, bodyY: 1, rotation: .11, frontHandX: 23, frontHandY: -14, backHandX: -25, backHandY: 1, frontFootX: -26, frontFootLift: 0, backFootX: 31, backFootLift: 0 },
+    { t: .75, bodyX: 2, bodyY: -4, rotation: .085, frontHandX: 8, frontHandY: -11, backHandX: -7, backHandY: -5, frontFootX: -9, frontFootLift: 12, backFootX: 7, backFootLift: 3 },
+    { t: 1, bodyX: 3, bodyY: 1, rotation: .11, frontHandX: -25, frontHandY: 1, backHandX: 23, backHandY: -14, frontFootX: 31, frontFootLift: 0, backFootX: -26, backFootLift: 0 }
   ],
   shield: [
-    { t: 0, bodyY: 6, scaleX: 1.12, scaleY: .84, frontHandX: -14, frontHandY: -12, backHandX: 13, backHandY: -8, frontFootX: 20, backFootX: -20 },
-    { t: .5, bodyY: 7, scaleX: 1.14, scaleY: .82, frontHandX: -15, frontHandY: -13, backHandX: 14, backHandY: -7, frontFootX: 21, backFootX: -21 },
-    { t: 1, bodyY: 6, scaleX: 1.12, scaleY: .84, frontHandX: -14, frontHandY: -12, backHandX: 13, backHandY: -8, frontFootX: 20, backFootX: -20 }
+    { t: 0, bodyX: -2, bodyY: 7, rotation: .035, scaleX: 1.12, scaleY: .84, frontHandX: 22, frontHandY: -13, backHandX: 8, backHandY: -2, frontFootX: 22, backFootX: -23 },
+    { t: .5, bodyX: -3, bodyY: 8, rotation: .045, scaleX: 1.15, scaleY: .81, frontHandX: 20, frontHandY: -15, backHandX: 10, backHandY: -1, frontFootX: 23, backFootX: -24 },
+    { t: 1, bodyX: -2, bodyY: 7, rotation: .035, scaleX: 1.12, scaleY: .84, frontHandX: 22, frontHandY: -13, backHandX: 8, backHandY: -2, frontFootX: 22, backFootX: -23 }
   ],
   tumble: [
-    { t: 0, frontHandX: 27, frontHandY: -20, backHandX: -24, backHandY: 17, frontFootX: 24, frontFootLift: 16, backFootX: -19, backFootLift: 1 },
-    { t: .5, frontHandX: -24, frontHandY: 17, backHandX: 27, backHandY: -20, frontFootX: -19, frontFootLift: 1, backFootX: 24, backFootLift: 16 },
-    { t: 1, frontHandX: 27, frontHandY: -20, backHandX: -24, backHandY: 17, frontFootX: 24, frontFootLift: 16, backFootX: -19, backFootLift: 1 }
+    { t: 0, bodyY: -2, scaleX: 1.06, scaleY: .92, frontHandX: 13, frontHandY: 4, backHandX: -11, backHandY: 5, frontFootX: 14, frontFootLift: 11, backFootX: -12, backFootLift: 9 },
+    { t: .5, bodyY: -1, scaleX: 1.08, scaleY: .9, frontHandX: -11, frontHandY: 5, backHandX: 13, backHandY: 4, frontFootX: -12, frontFootLift: 9, backFootX: 14, backFootLift: 11 },
+    { t: 1, bodyY: -2, scaleX: 1.06, scaleY: .92, frontHandX: 13, frontHandY: 4, backHandX: -11, backHandY: 5, frontFootX: 14, frontFootLift: 11, backFootX: -12, backFootLift: 9 }
   ]
 });
 
 const ONESHOT_KEYFRAMES = Object.freeze({
   jumpSquat: [
     { t: 0, bodyY: 0 },
-    { t: .55, bodyY: 9, scaleX: 1.2, scaleY: .75, frontHandX: 14, frontHandY: 4, backHandX: -13, backHandY: 5, frontFootX: 15, backFootX: -15 },
-    { t: 1, bodyY: 5, scaleX: 1.08, scaleY: .88, frontHandX: 17, frontHandY: -14, backHandX: -14, backHandY: -10, frontFootX: 12, backFootX: -11 }
+    { t: .55, bodyX: -2, bodyY: 10, rotation: .035, scaleX: 1.2, scaleY: .74, frontHandX: -24, frontHandY: 9, backHandX: -18, backHandY: 5, frontFootX: 19, backFootX: -20 },
+    { t: 1, bodyX: 1, bodyY: 5, rotation: -.025, scaleX: 1.08, scaleY: .88, frontHandX: 26, frontHandY: -13, backHandX: -20, backHandY: -7, frontFootX: 14, backFootX: -13 }
   ],
   jump: [
-    { t: 0, bodyY: 5, scaleX: 1.08, scaleY: .9, frontHandX: 17, frontHandY: -14, backHandX: -14, backHandY: -10, frontFootX: 12, frontFootLift: 4, backFootX: -11, backFootLift: 6 },
-    { t: .5, bodyY: -5, scaleX: .94, scaleY: 1.08, frontHandX: 12, frontHandY: -24, backHandX: -10, backHandY: -20, frontFootX: 8, frontFootLift: 12, backFootX: -7, backFootLift: 17 },
-    { t: 1, bodyY: -2, scaleX: .98, scaleY: 1.02, frontHandX: 18, frontHandY: -14, backHandX: -16, backHandY: -11, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 10 }
+    { t: 0, bodyX: 1, bodyY: 5, rotation: -.025, scaleX: 1.08, scaleY: .9, frontHandX: 26, frontHandY: -13, backHandX: -20, backHandY: -7, frontFootX: 14, frontFootLift: 4, backFootX: -13, backFootLift: 6 },
+    { t: .5, bodyX: 2, bodyY: -6, rotation: -.05, scaleX: .94, scaleY: 1.08, frontHandX: 29, frontHandY: -18, backHandX: -23, backHandY: -11, frontFootX: 9, frontFootLift: 14, backFootX: -8, backFootLift: 18 },
+    { t: 1, bodyX: 0, bodyY: -2, rotation: .015, scaleX: .99, scaleY: 1.01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
   ],
   fall: [
-    { t: 0, bodyY: -1, frontHandX: 20, frontHandY: -12, backHandX: -19, backHandY: -9, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 10 },
-    { t: .5, bodyY: 1, scaleX: 1.05, scaleY: .96, frontHandX: 25, frontHandY: -5, backHandX: -23, backHandY: -3, frontFootX: 15, frontFootLift: 2, backFootX: -13, backFootLift: 5 },
-    { t: 1, bodyY: -1, frontHandX: 20, frontHandY: -12, backHandX: -19, backHandY: -9, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 10 }
+    { t: 0, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 },
+    { t: .5, bodyY: 2, rotation: .025, scaleX: 1.05, scaleY: .96, frontHandX: 31, frontHandY: 1, backHandX: -29, backHandY: 4, frontFootX: 17, frontFootLift: 3, backFootX: -15, backFootLift: 6 },
+    { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
   ],
   landing: [
-    { t: 0, bodyY: 11, scaleX: 1.24, scaleY: .72, frontHandX: 27, frontHandY: 8, backHandX: -23, backHandY: 6, frontFootX: 21, backFootX: -21 },
-    { t: .45, bodyY: 8, scaleX: 1.17, scaleY: .8, frontHandX: 22, frontHandY: 2, backHandX: -19, backHandY: 3, frontFootX: 19, backFootX: -19 },
-    { t: 1, bodyY: 0, scaleX: 1, scaleY: 1, frontHandX: 22, frontHandY: -4, backHandX: -16, backHandY: 3, frontFootX: 11, backFootX: -11 }
+    { t: 0, bodyX: 2, bodyY: 12, rotation: -.035, scaleX: 1.24, scaleY: .71, frontHandX: 31, frontHandY: 8, backHandX: -28, backHandY: 7, frontFootX: 24, backFootX: -25 },
+    { t: .45, bodyX: 1, bodyY: 8, rotation: .02, scaleX: 1.16, scaleY: .81, frontHandX: 26, frontHandY: 2, backHandX: -23, backHandY: 4, frontFootX: 21, backFootX: -22 },
+    { t: 1, bodyX: 0, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   hit: [
-    { t: 0, bodyX: 8, bodyY: -7, rotation: .3, scaleX: .75, scaleY: 1.18, frontHandX: -31, frontHandY: -21, backHandX: -24, backHandY: 19, frontFootX: 20, frontFootLift: 6, backFootX: -14, backFootLift: 12 },
-    { t: .55, bodyX: 5, bodyY: -3, rotation: .2, scaleX: .86, scaleY: 1.1, frontHandX: -25, frontHandY: -14, backHandX: -19, backHandY: 14, frontFootX: 17, frontFootLift: 4, backFootX: -12, backFootLift: 8 },
-    { t: 1, bodyX: 2, bodyY: 0, rotation: .08, scaleX: .96, scaleY: 1.02, frontHandX: -18, frontHandY: -7, backHandX: -13, backHandY: 8, frontFootX: 13, frontFootLift: 2, backFootX: -11, backFootLift: 4 }
+    { t: 0, bodyX: 9, bodyY: -7, rotation: .32, scaleX: .76, scaleY: 1.18, frontHandX: -35, frontHandY: -17, backHandX: -27, backHandY: 17, frontFootX: 23, frontFootLift: 5, backFootX: -17, backFootLift: 13 },
+    { t: .55, bodyX: 5, bodyY: -3, rotation: .21, scaleX: .87, scaleY: 1.09, frontHandX: -29, frontHandY: -11, backHandX: -22, backHandY: 13, frontFootX: 19, frontFootLift: 4, backFootX: -14, backFootLift: 9 },
+    { t: 1, bodyX: 2, bodyY: 0, rotation: .08, scaleX: .96, scaleY: 1.02, frontHandX: -20, frontHandY: -4, backHandX: -15, backHandY: 8, frontFootX: 15, frontFootLift: 2, backFootX: -13, backFootLift: 5 }
   ],
   groundHit: [
-    { t: 0, bodyX: 7, bodyY: 12, rotation: .24, scaleX: 1.25, scaleY: .7, frontHandX: -34, frontHandY: -14, backHandX: -27, backHandY: 15, frontFootX: 28, backFootX: -24 },
-    { t: .65, bodyX: 3, bodyY: 8, rotation: .12, scaleX: 1.15, scaleY: .8, frontHandX: -25, frontHandY: -9, backHandX: -19, backHandY: 11, frontFootX: 22, backFootX: -20 },
-    { t: 1, bodyX: 0, bodyY: 3, rotation: .04, scaleX: 1.04, scaleY: .94, frontHandX: -16, frontHandY: -4, backHandX: -12, backHandY: 6, frontFootX: 15, backFootX: -15 }
+    { t: 0, bodyX: 8, bodyY: 12, rotation: .25, scaleX: 1.24, scaleY: .7, frontHandX: -36, frontHandY: -10, backHandX: -29, backHandY: 14, frontFootX: 30, backFootX: -27 },
+    { t: .65, bodyX: 4, bodyY: 8, rotation: .13, scaleX: 1.15, scaleY: .8, frontHandX: -28, frontHandY: -6, backHandX: -22, backHandY: 11, frontFootX: 24, backFootX: -22 },
+    { t: 1, bodyX: 0, bodyY: 3, rotation: .035, scaleX: 1.04, scaleY: .94, frontHandX: -19, frontHandY: -2, backHandX: -15, backHandY: 7, frontFootX: 17, backFootX: -17 }
   ],
   shieldHit: [
-    { t: 0, bodyX: -10, bodyY: 12, rotation: -.18, scaleX: 1.3, scaleY: .68, frontHandX: -30, frontHandY: -22, backHandX: 9, backHandY: 2, frontFootX: 15, backFootX: -28 },
-    { t: .55, bodyX: -5, bodyY: 9, rotation: -.09, scaleX: 1.22, scaleY: .75, frontHandX: -23, frontHandY: -17, backHandX: 11, backHandY: -3, frontFootX: 18, backFootX: -25 },
-    { t: 1, bodyX: 0, bodyY: 6, rotation: 0, scaleX: 1.12, scaleY: .84, frontHandX: -14, frontHandY: -12, backHandX: 13, backHandY: -8, frontFootX: 20, backFootX: -20 }
+    { t: 0, bodyX: -11, bodyY: 12, rotation: -.19, scaleX: 1.3, scaleY: .68, frontHandX: 10, frontHandY: -22, backHandX: 2, backHandY: 2, frontFootX: 17, backFootX: -30 },
+    { t: .55, bodyX: -6, bodyY: 9, rotation: -.1, scaleX: 1.22, scaleY: .75, frontHandX: 16, frontHandY: -17, backHandX: 6, backHandY: -2, frontFootX: 20, backFootX: -27 },
+    { t: 1, bodyX: -2, bodyY: 7, rotation: .035, scaleX: 1.12, scaleY: .84, frontHandX: 22, frontHandY: -13, backHandX: 8, backHandY: -2, frontFootX: 22, backFootX: -23 }
   ],
   parry: [
-    { t: 0, bodyY: 5, scaleX: 1.2, scaleY: .8, frontHandX: 38, frontHandY: -24, backHandX: -34, backHandY: -20, frontFootX: 25, backFootX: -25 },
-    { t: .45, bodyY: -3, scaleX: .96, scaleY: 1.08, frontHandX: 31, frontHandY: -21, backHandX: -29, backHandY: -19, frontFootX: 22, backFootX: -22 },
-    { t: 1, bodyY: 0, scaleX: 1, scaleY: 1 }
+    { t: 0, bodyX: -3, bodyY: 6, rotation: .08, scaleX: 1.18, scaleY: .82, frontHandX: 42, frontHandY: -15, backHandX: -12, backHandY: -5, frontFootX: 26, backFootX: -27 },
+    { t: .45, bodyX: 2, bodyY: -2, rotation: -.07, scaleX: .97, scaleY: 1.07, frontHandX: 36, frontHandY: -18, backHandX: -19, backHandY: -3, frontFootX: 23, backFootX: -23 },
+    { t: 1, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   roll: [
-    { t: 0, bodyY: 2, rotation: 0, scaleX: 1.04, scaleY: .94, frontHandX: 16, frontHandY: 4, backHandX: -14, backHandY: 5, frontFootX: 12, frontFootLift: 1, backFootX: -12, backFootLift: 1 },
-    { t: .25, bodyY: 14, rotation: 1.55, scaleX: 1.2, scaleY: .62, frontHandX: 6, frontHandY: 12, backHandX: -6, backHandY: 12, frontFootX: 6, frontFootLift: 8, backFootX: -6, backFootLift: 8 },
-    { t: .5, bodyY: 15, rotation: 3.14, scaleX: 1.23, scaleY: .6, frontHandX: 5, frontHandY: 13, backHandX: -5, backHandY: 13, frontFootX: 5, frontFootLift: 9, backFootX: -5, backFootLift: 9 },
-    { t: .75, bodyY: 12, rotation: 4.72, scaleX: 1.16, scaleY: .68, frontHandX: 7, frontHandY: 10, backHandX: -7, backHandY: 10, frontFootX: 7, frontFootLift: 7, backFootX: -7, backFootLift: 7 },
-    { t: 1, bodyY: 0, rotation: 6.28, scaleX: 1, scaleY: 1 }
+    { t: 0, bodyX: 1, bodyY: 3, rotation: 0, scaleX: 1.04, scaleY: .94, frontHandX: 18, frontHandY: 5, backHandX: -16, backHandY: 6, frontFootX: 15, frontFootLift: 1, backFootX: -15, backFootLift: 1 },
+    { t: .25, bodyX: 3, bodyY: 14, rotation: 1.55, scaleX: 1.18, scaleY: .64, frontHandX: 8, frontHandY: 11, backHandX: -8, backHandY: 11, frontFootX: 8, frontFootLift: 8, backFootX: -8, backFootLift: 8 },
+    { t: .5, bodyX: 4, bodyY: 15, rotation: 3.14, scaleX: 1.2, scaleY: .62, frontHandX: 7, frontHandY: 12, backHandX: -7, backHandY: 12, frontFootX: 7, frontFootLift: 9, backFootX: -7, backFootLift: 9 },
+    { t: .75, bodyX: 3, bodyY: 12, rotation: 4.72, scaleX: 1.14, scaleY: .7, frontHandX: 9, frontHandY: 9, backHandX: -9, backHandY: 9, frontFootX: 9, frontFootLift: 7, backFootX: -9, backFootLift: 7 },
+    { t: 1, bodyX: 1, bodyY: 0, rotation: 6.28, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   crouch: [
     { t: 0 },
-    { t: .55, bodyY: 10, scaleX: 1.16, scaleY: .72, frontHandX: 18, frontHandY: 7, backHandX: -16, backHandY: 8, frontFootX: 18, backFootX: -18 },
-    { t: 1, bodyY: 10, scaleX: 1.16, scaleY: .72, frontHandX: 18, frontHandY: 7, backHandX: -16, backHandY: 8, frontFootX: 18, backFootX: -18 }
+    { t: .55, bodyX: -1, bodyY: 10, rotation: .03, scaleX: 1.16, scaleY: .72, frontHandX: 23, frontHandY: -1, backHandX: -13, backHandY: 7, frontFootX: 20, backFootX: -21 },
+    { t: 1, bodyX: -1, bodyY: 10, rotation: .03, scaleX: 1.16, scaleY: .72, frontHandX: 23, frontHandY: -1, backHandX: -13, backHandY: 7, frontFootX: 20, backFootX: -21 }
   ],
   doubleJump: [
-    { t: 0, bodyY: -2, frontHandX: 20, frontHandY: -13, backHandX: -18, backHandY: -10, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 9 },
-    { t: .28, bodyY: -11, rotation: 1.5, scaleX: 1.18, scaleY: .72, frontHandX: 8, frontHandY: 7, backHandX: -8, backHandY: 7, frontFootX: 6, frontFootLift: 15, backFootX: -6, backFootLift: 14 },
-    { t: .58, bodyY: -8, rotation: 3.15, scaleX: .82, scaleY: 1.2, frontHandX: 17, frontHandY: -20, backHandX: -15, backHandY: -17, frontFootX: 8, frontFootLift: 12, backFootX: -7, backFootLift: 17 },
-    { t: 1, bodyY: -2, rotation: 6.28, scaleX: .98, scaleY: 1.02, frontHandX: 18, frontHandY: -14, backHandX: -16, backHandY: -11, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 10 }
+    { t: 0, bodyY: -2, frontHandX: 25, frontHandY: -8, backHandX: -22, backHandY: -4, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 10 },
+    { t: .28, bodyY: -11, rotation: 1.5, scaleX: 1.16, scaleY: .74, frontHandX: 10, frontHandY: 8, backHandX: -10, backHandY: 8, frontFootX: 8, frontFootLift: 15, backFootX: -8, backFootLift: 14 },
+    { t: .58, bodyY: -8, rotation: 3.15, scaleX: .84, scaleY: 1.18, frontHandX: 20, frontHandY: -16, backHandX: -18, backHandY: -12, frontFootX: 10, frontFootLift: 12, backFootX: -9, backFootLift: 17 },
+    { t: 1, bodyY: -2, rotation: 6.28, scaleX: .99, scaleY: 1.01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
   ],
   spotDodge: [
     { t: 0 },
-    { t: .3, bodyX: -9, bodyY: -6, rotation: -.16, scaleX: .78, scaleY: 1.12, frontHandX: 8, frontHandY: -19, backHandX: -7, backHandY: -15, frontFootX: 13, backFootX: -13 },
-    { t: .7, bodyX: -7, bodyY: -4, rotation: -.1, scaleX: .84, scaleY: 1.08, frontHandX: 10, frontHandY: -16, backHandX: -9, backHandY: -12, frontFootX: 14, backFootX: -14 },
+    { t: .3, bodyX: -10, bodyY: -5, rotation: -.18, scaleX: .8, scaleY: 1.1, frontHandX: 16, frontHandY: -13, backHandX: -10, backHandY: -8, frontFootX: 16, backFootX: -17 },
+    { t: .7, bodyX: -7, bodyY: -3, rotation: -.11, scaleX: .86, scaleY: 1.06, frontHandX: 19, frontHandY: -10, backHandX: -12, backHandY: -5, frontFootX: 16, backFootX: -17 },
     { t: 1 }
   ],
   airDodge: [
-    { t: 0, frontHandX: 23, frontHandY: -10, backHandX: -21, backHandY: -7, frontFootX: 13, frontFootLift: 6, backFootX: -12, backFootLift: 8 },
-    { t: .38, bodyY: -7, rotation: -.12, scaleX: .72, scaleY: 1.2, frontHandX: 6, frontHandY: 6, backHandX: -6, backHandY: 7, frontFootX: 5, frontFootLift: 14, backFootX: -5, backFootLift: 14 },
-    { t: .72, bodyY: -5, rotation: .08, scaleX: .82, scaleY: 1.12, frontHandX: 9, frontHandY: 2, backHandX: -9, backHandY: 3, frontFootX: 7, frontFootLift: 11, backFootX: -7, backFootLift: 12 },
-    { t: 1, frontHandX: 20, frontHandY: -12, backHandX: -19, backHandY: -9, frontFootX: 12, frontFootLift: 7, backFootX: -10, backFootLift: 10 }
+    { t: 0, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 7, backFootX: -11, backFootLift: 9 },
+    { t: .38, bodyY: -6, rotation: -.13, scaleX: .76, scaleY: 1.16, frontHandX: 9, frontHandY: 7, backHandX: -9, backHandY: 7, frontFootX: 7, frontFootLift: 14, backFootX: -7, backFootLift: 14 },
+    { t: .72, bodyY: -4, rotation: .07, scaleX: .85, scaleY: 1.09, frontHandX: 13, frontHandY: 3, backHandX: -13, backHandY: 4, frontFootX: 9, frontFootLift: 11, backFootX: -9, backFootLift: 12 },
+    { t: 1, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
   ],
   knockdown: [
     { t: 0, bodyY: 13, rotation: 1.45, scaleX: 1.2, scaleY: .64, frontHandX: 28, frontHandY: 12, backHandX: -25, backHandY: 11, frontFootX: 28, backFootX: -25 },
@@ -1101,34 +1183,34 @@ const ONESHOT_KEYFRAMES = Object.freeze({
 
 const ATTACK_KEYFRAMES = Object.freeze({
   jab1: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -4, rotation: .1, frontHandX: -9, frontHandY: 0, backHandX: -12, backHandY: -7, frontFootX: 15, backFootX: -18 }],
-    active: [{ t: 0, bodyX: -4, rotation: .1, frontHandX: -9, frontHandY: 0 }, { t: .28, bodyX: 10, rotation: -.17, frontHandX: 61, frontHandY: -8, backHandX: -10, backHandY: -8, frontFootX: 23, backFootX: -15 }, { t: 1, bodyX: 7, rotation: -.1, frontHandX: 51, frontHandY: -6, backHandX: -10, backHandY: -8, frontFootX: 21, backFootX: -16 }],
-    recovery: [{ t: 0, bodyX: 7, rotation: -.1, frontHandX: 51, frontHandY: -6, backHandX: -10, backHandY: -8, frontFootX: 21, backFootX: -16 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -4, bodyY: 1, rotation: .1, frontHandX: -10, frontHandY: 1, backHandX: -18, backHandY: -6, frontFootX: 16, backFootX: -20 }],
+    active: [{ t: 0, bodyX: -4, bodyY: 1, rotation: .1, frontHandX: -10, frontHandY: 1, backHandX: -18, backHandY: -6 }, { t: .28, bodyX: 10, bodyY: 0, rotation: -.17, frontHandX: 61, frontHandY: -7, backHandX: -19, backHandY: -5, frontFootX: 24, backFootX: -17 }, { t: 1, bodyX: 7, rotation: -.1, frontHandX: 51, frontHandY: -5, backHandX: -18, backHandY: -4, frontFootX: 21, backFootX: -18 }],
+    recovery: [{ t: 0, bodyX: 7, rotation: -.1, frontHandX: 51, frontHandY: -5, backHandX: -18, backHandY: -4, frontFootX: 21, backFootX: -18 }, { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   jab2: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -3, rotation: -.11, frontHandX: -11, frontHandY: -7, backHandX: -22, backHandY: -1, frontFootX: 17, backFootX: -20 }],
-    active: [{ t: 0, bodyX: -3, rotation: -.11, backHandX: -22, backHandY: -1 }, { t: .3, bodyX: 9, rotation: .18, frontHandX: -10, frontHandY: -8, backHandX: 64, backHandY: -10, frontFootX: 17, backFootX: -24 }, { t: 1, bodyX: 6, rotation: .11, frontHandX: -10, frontHandY: -8, backHandX: 53, backHandY: -8, frontFootX: 17, backFootX: -22 }],
-    recovery: [{ t: 0, bodyX: 6, rotation: .11, frontHandX: -10, frontHandY: -8, backHandX: 53, backHandY: -8, frontFootX: 17, backFootX: -22 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -3, bodyY: 1, rotation: -.12, frontHandX: 19, frontHandY: -8, backHandX: -24, backHandY: 1, frontFootX: 18, backFootX: -21 }],
+    active: [{ t: 0, bodyX: -3, bodyY: 1, rotation: -.12, frontHandX: 19, frontHandY: -8, backHandX: -24, backHandY: 1 }, { t: .3, bodyX: 9, rotation: .18, frontHandX: 17, frontHandY: -7, backHandX: 64, backHandY: -9, frontFootX: 18, backFootX: -25 }, { t: 1, bodyX: 6, rotation: .11, frontHandX: 18, frontHandY: -6, backHandX: 53, backHandY: -7, frontFootX: 18, backFootX: -23 }],
+    recovery: [{ t: 0, bodyX: 6, rotation: .11, frontHandX: 18, frontHandY: -6, backHandX: 53, backHandY: -7, frontFootX: 18, backFootX: -23 }, { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   finisher: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -8, bodyY: 4, rotation: .2, scaleX: 1.12, scaleY: .88, frontHandX: -25, frontHandY: -12, backHandX: -16, backHandY: 11, frontFootX: 20, backFootX: -24 }],
-    active: [{ t: 0, bodyX: -8, bodyY: 4, rotation: .2 }, { t: .35, bodyX: 14, rotation: -.3, scaleX: 1.18, scaleY: .84, frontHandX: 72, frontHandY: -11, backHandX: 45, backHandY: 8, frontFootX: 30, backFootX: -23 }, { t: 1, bodyX: 10, rotation: -.2, scaleX: 1.12, scaleY: .9, frontHandX: 61, frontHandY: -8, backHandX: 35, backHandY: 7, frontFootX: 27, backFootX: -22 }],
-    recovery: [{ t: 0, bodyX: 10, rotation: -.2, frontHandX: 61, backHandX: 35, frontFootX: 27, backFootX: -22 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -9, bodyY: 5, rotation: .22, scaleX: 1.12, scaleY: .88, frontHandX: -27, frontHandY: -10, backHandX: -22, backHandY: 10, frontFootX: 22, backFootX: -27 }],
+    active: [{ t: 0, bodyX: -9, bodyY: 5, rotation: .22, frontHandX: -27, frontHandY: -10, backHandX: -22, backHandY: 10 }, { t: .35, bodyX: 15, bodyY: 2, rotation: -.31, scaleX: 1.18, scaleY: .84, frontHandX: 72, frontHandY: -10, backHandX: 39, backHandY: 5, frontFootX: 32, backFootX: -25 }, { t: 1, bodyX: 10, rotation: -.2, scaleX: 1.12, scaleY: .9, frontHandX: 61, frontHandY: -7, backHandX: 31, backHandY: 5, frontFootX: 28, backFootX: -23 }],
+    recovery: [{ t: 0, bodyX: 10, rotation: -.2, frontHandX: 61, frontHandY: -7, backHandX: 31, backHandY: 5, frontFootX: 28, backFootX: -23 }, { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   side: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -9, bodyY: 3, rotation: .18, scaleX: 1.12, scaleY: .9, frontHandX: -28, frontHandY: -2, backHandX: -17, backHandY: 9, frontFootX: 19, backFootX: -24 }],
-    active: [{ t: 0, bodyX: -9, rotation: .18 }, { t: .3, bodyX: 18, rotation: -.28, scaleX: 1.2, scaleY: .84, frontHandX: 78, frontHandY: -7, backHandX: -19, backHandY: 10, frontFootX: 32, backFootX: -21 }, { t: 1, bodyX: 13, rotation: -.18, scaleX: 1.13, scaleY: .9, frontHandX: 66, frontHandY: -5, backHandX: -17, backHandY: 9, frontFootX: 28, backFootX: -21 }],
-    recovery: [{ t: 0, bodyX: 13, rotation: -.18, frontHandX: 66, frontFootX: 28, backFootX: -21 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -10, bodyY: 4, rotation: .2, scaleX: 1.12, scaleY: .9, frontHandX: -30, frontHandY: 0, backHandX: -21, backHandY: 8, frontFootX: 21, backFootX: -27 }],
+    active: [{ t: 0, bodyX: -10, bodyY: 4, rotation: .2, frontHandX: -30, frontHandY: 0, backHandX: -21, backHandY: 8 }, { t: .3, bodyX: 18, bodyY: 2, rotation: -.29, scaleX: 1.2, scaleY: .84, frontHandX: 78, frontHandY: -6, backHandX: -20, backHandY: 7, frontFootX: 33, backFootX: -23 }, { t: 1, bodyX: 13, rotation: -.18, scaleX: 1.13, scaleY: .9, frontHandX: 66, frontHandY: -4, backHandX: -19, backHandY: 7, frontFootX: 29, backFootX: -22 }],
+    recovery: [{ t: 0, bodyX: 13, rotation: -.18, frontHandX: 66, frontHandY: -4, backHandX: -19, backHandY: 7, frontFootX: 29, backFootX: -22 }, { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   up: {
-    startup: [{ t: 0 }, { t: 1, bodyY: 7, scaleX: 1.14, scaleY: .82, frontHandX: 10, frontHandY: 12, backHandX: -8, backHandY: 8, frontFootX: 18, backFootX: -18 }],
-    active: [{ t: 0, bodyY: 7 }, { t: .3, bodyY: -13, scaleX: .84, scaleY: 1.25, frontHandX: 8, frontHandY: -59, backHandX: -7, backHandY: -48, frontFootX: 14, backFootX: -14 }, { t: 1, bodyY: -8, scaleX: .9, scaleY: 1.16, frontHandX: 10, frontHandY: -50, backHandX: -8, backHandY: -40 }],
-    recovery: [{ t: 0, bodyY: -8, frontHandY: -50, backHandY: -40 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -2, bodyY: 8, rotation: .03, scaleX: 1.14, scaleY: .82, frontHandX: -5, frontHandY: 12, backHandX: -15, backHandY: 7, frontFootX: 20, backFootX: -21 }],
+    active: [{ t: 0, bodyX: -2, bodyY: 8, rotation: .03, frontHandX: -5, frontHandY: 12, backHandX: -15, backHandY: 7 }, { t: .3, bodyX: 3, bodyY: -13, rotation: -.07, scaleX: .84, scaleY: 1.25, frontHandX: 12, frontHandY: -59, backHandX: -14, backHandY: -34, frontFootX: 16, backFootX: -16 }, { t: 1, bodyX: 2, bodyY: -8, rotation: -.04, scaleX: .9, scaleY: 1.16, frontHandX: 13, frontHandY: -50, backHandX: -16, backHandY: -28 }],
+    recovery: [{ t: 0, bodyX: 2, bodyY: -8, rotation: -.04, frontHandX: 13, frontHandY: -50, backHandX: -16, backHandY: -28 }, { t: 1, bodyX: 0, bodyY: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   down: {
-    startup: [{ t: 0 }, { t: 1, bodyY: 9, scaleX: 1.22, scaleY: .76, frontHandX: 18, frontHandY: 9, backHandX: -17, backHandY: 7, frontFootX: 17, backFootX: -17 }],
-    active: [{ t: 0, bodyY: 9 }, { t: .32, bodyY: 10, rotation: -.08, scaleX: 1.26, scaleY: .72, frontHandX: 29, frontHandY: 18, backHandX: -24, backHandY: 16, frontFootX: 59, frontFootLift: 4, backFootX: -17 }, { t: 1, bodyY: 8, frontHandX: 25, frontHandY: 14, backHandX: -21, backHandY: 13, frontFootX: 48, frontFootLift: 3 }],
-    recovery: [{ t: 0, bodyY: 8, frontFootX: 48, frontFootLift: 3 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -2, bodyY: 9, rotation: .05, scaleX: 1.22, scaleY: .76, frontHandX: 16, frontHandY: 6, backHandX: -21, backHandY: 5, frontFootX: 19, backFootX: -21 }],
+    active: [{ t: 0, bodyX: -2, bodyY: 9, rotation: .05, frontHandX: 16, frontHandY: 6, backHandX: -21, backHandY: 5 }, { t: .32, bodyX: 4, bodyY: 10, rotation: -.09, scaleX: 1.26, scaleY: .72, frontHandX: -6, frontHandY: 11, backHandX: -27, backHandY: 14, frontFootX: 59, frontFootLift: 4, backFootX: -20 }, { t: 1, bodyX: 2, bodyY: 8, rotation: -.05, frontHandX: 3, frontHandY: 8, backHandX: -23, backHandY: 11, frontFootX: 48, frontFootLift: 3, backFootX: -19 }],
+    recovery: [{ t: 0, bodyX: 2, bodyY: 8, rotation: -.05, frontHandX: 3, frontHandY: 8, backHandX: -23, backHandY: 11, frontFootX: 48, frontFootLift: 3, backFootX: -19 }, { t: 1, bodyX: 0, bodyY: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   getupAttack: {
     startup: [
@@ -1147,39 +1229,39 @@ const ATTACK_KEYFRAMES = Object.freeze({
     ]
   },
   airForward: {
-    startup: [{ t: 0 }, { t: 1, rotation: .12, frontHandX: -20, frontHandY: -13, backHandX: -25, backHandY: 7, frontFootX: 9, frontFootLift: 10, backFootX: -16, backFootLift: 7 }],
-    active: [{ t: 0, rotation: .12 }, { t: .3, rotation: -.24, frontHandX: -22, frontHandY: -13, backHandX: -28, backHandY: 7, frontFootX: 68, frontFootLift: 21, backFootX: -18, backFootLift: 7 }, { t: 1, rotation: -.16, frontFootX: 57, frontFootLift: 18 }],
-    recovery: [{ t: 0, rotation: -.16, frontFootX: 57, frontFootLift: 18 }, { t: 1, frontFootX: 14, frontFootLift: 4, backFootX: -12, backFootLift: 7 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -2, rotation: .13, frontHandX: -22, frontHandY: -9, backHandX: -28, backHandY: 6, frontFootX: 10, frontFootLift: 11, backFootX: -18, backFootLift: 8 }],
+    active: [{ t: 0, bodyX: -2, rotation: .13, frontHandX: -22, frontHandY: -9, backHandX: -28, backHandY: 6 }, { t: .3, bodyX: 5, rotation: -.25, frontHandX: -27, frontHandY: -5, backHandX: -31, backHandY: 8, frontFootX: 68, frontFootLift: 21, backFootX: -20, backFootLift: 8 }, { t: 1, bodyX: 3, rotation: -.16, frontHandX: -24, frontHandY: -4, backHandX: -28, backHandY: 7, frontFootX: 57, frontFootLift: 18 }],
+    recovery: [{ t: 0, bodyX: 3, rotation: -.16, frontHandX: -24, frontHandY: -4, backHandX: -28, backHandY: 7, frontFootX: 57, frontFootLift: 18 }, { t: 1, bodyX: 0, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airBack: {
-    startup: [{ t: 0 }, { t: 1, rotation: -.14, frontHandX: 21, frontHandY: -12, backHandX: 27, backHandY: 7, frontFootX: 16, frontFootLift: 7, backFootX: -9, backFootLift: 11 }],
-    active: [{ t: 0, rotation: -.14 }, { t: .3, rotation: .25, frontHandX: 22, frontHandY: -12, backHandX: 28, backHandY: 7, frontFootX: 18, frontFootLift: 7, backFootX: -69, backFootLift: 22 }, { t: 1, rotation: .17, backFootX: -58, backFootLift: 19 }],
-    recovery: [{ t: 0, rotation: .17, backFootX: -58, backFootLift: 19 }, { t: 1, frontFootX: 14, frontFootLift: 4, backFootX: -12, backFootLift: 7 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: 2, rotation: -.15, frontHandX: 24, frontHandY: -7, backHandX: 31, backHandY: 7, frontFootX: 18, frontFootLift: 8, backFootX: -10, backFootLift: 12 }],
+    active: [{ t: 0, bodyX: 2, rotation: -.15, frontHandX: 24, frontHandY: -7, backHandX: 31, backHandY: 7 }, { t: .3, bodyX: -5, rotation: .26, frontHandX: 29, frontHandY: -4, backHandX: 33, backHandY: 9, frontFootX: 20, frontFootLift: 8, backFootX: -69, backFootLift: 22 }, { t: 1, bodyX: -3, rotation: .17, frontHandX: 27, frontHandY: -4, backHandX: 30, backHandY: 8, backFootX: -58, backFootLift: 19 }],
+    recovery: [{ t: 0, bodyX: -3, rotation: .17, frontHandX: 27, frontHandY: -4, backHandX: 30, backHandY: 8, backFootX: -58, backFootLift: 19 }, { t: 1, bodyX: 0, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airNeutral: {
-    startup: [{ t: 0 }, { t: 1, scaleX: .88, scaleY: 1.1, frontHandX: 13, frontHandY: -20, backHandX: -12, backHandY: -17, frontFootX: 8, frontFootLift: 12, backFootX: -7, backFootLift: 14 }],
-    active: [{ t: 0 }, { t: .35, scaleX: 1.18, scaleY: .84, frontHandX: 27, frontHandY: -12, backHandX: -24, backHandY: -9, frontFootX: 47, frontFootLift: 4, backFootX: -45, backFootLift: 20 }, { t: 1, scaleX: 1.1, scaleY: .9, frontHandX: 24, backHandX: -21, frontFootX: 39, backFootX: -37 }],
-    recovery: [{ t: 0, scaleX: 1.1, scaleY: .9, frontFootX: 39, backFootX: -37 }, { t: 1, frontFootX: 14, frontFootLift: 4, backFootX: -12, backFootLift: 7 }]
+    startup: [{ t: 0 }, { t: 1, bodyY: -2, rotation: .04, scaleX: .88, scaleY: 1.1, frontHandX: 16, frontHandY: -16, backHandX: -15, backHandY: -12, frontFootX: 9, frontFootLift: 13, backFootX: -8, backFootLift: 15 }],
+    active: [{ t: 0, bodyY: -2, rotation: .04, scaleX: .88, scaleY: 1.1 }, { t: .35, bodyY: 2, rotation: -.05, scaleX: 1.18, scaleY: .84, frontHandX: 31, frontHandY: -7, backHandX: -29, backHandY: -4, frontFootX: 47, frontFootLift: 4, backFootX: -45, backFootLift: 20 }, { t: 1, bodyY: 1, rotation: -.03, scaleX: 1.1, scaleY: .9, frontHandX: 28, frontHandY: -6, backHandX: -26, backHandY: -3, frontFootX: 39, backFootX: -37 }],
+    recovery: [{ t: 0, bodyY: 1, rotation: -.03, scaleX: 1.1, scaleY: .9, frontHandX: 28, frontHandY: -6, backHandX: -26, backHandY: -3, frontFootX: 39, backFootX: -37 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airDown: {
-    startup: [{ t: 0 }, { t: 1, bodyY: -4, scaleX: .9, scaleY: 1.1, frontHandX: 22, frontHandY: -18, backHandX: -21, backHandY: -18, frontFootX: 7, frontFootLift: 13, backFootX: -7, backFootLift: 11 }],
-    active: [{ t: 0, bodyY: -4 }, { t: .3, bodyY: 7, scaleX: 1.08, scaleY: 1.16, frontHandX: 25, frontHandY: -15, backHandX: -25, backHandY: -15, frontFootX: 8, frontFootLift: -28, backFootX: -8, backFootLift: -24 }, { t: 1, bodyY: 5, frontFootLift: -22, backFootLift: -20 }],
-    recovery: [{ t: 0, bodyY: 5, frontFootLift: -22, backFootLift: -20 }, { t: 1, frontFootX: 14, frontFootLift: 2, backFootX: -12, backFootLift: 5 }]
+    startup: [{ t: 0 }, { t: 1, bodyY: -5, rotation: -.03, scaleX: .9, scaleY: 1.1, frontHandX: 28, frontHandY: -14, backHandX: -26, backHandY: -12, frontFootX: 8, frontFootLift: 14, backFootX: -8, backFootLift: 12 }],
+    active: [{ t: 0, bodyY: -5, rotation: -.03, frontHandX: 28, frontHandY: -14, backHandX: -26, backHandY: -12 }, { t: .3, bodyY: 7, rotation: .035, scaleX: 1.08, scaleY: 1.16, frontHandX: 31, frontHandY: -5, backHandX: -30, backHandY: -4, frontFootX: 8, frontFootLift: -28, backFootX: -8, backFootLift: -24 }, { t: 1, bodyY: 5, rotation: .02, frontHandX: 29, frontHandY: -4, backHandX: -28, backHandY: -3, frontFootLift: -22, backFootLift: -20 }],
+    recovery: [{ t: 0, bodyY: 5, rotation: .02, frontHandX: 29, frontHandY: -4, backHandX: -28, backHandY: -3, frontFootLift: -22, backFootLift: -20 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   cast: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -11, rotation: .18, scaleX: 1.14, scaleY: .88, frontHandX: -8, frontHandY: -17, backHandX: -16, backHandY: 12, frontFootX: 18, backFootX: -20 }],
-    active: [{ t: 0, bodyX: -11, rotation: .18 }, { t: .35, bodyX: 13, rotation: -.27, frontHandX: 70, frontHandY: -15, backHandX: 45, backHandY: 13, frontFootX: 25, backFootX: -18 }, { t: 1, bodyX: 8, rotation: -.16, frontHandX: 60, backHandX: 38 }],
-    recovery: [{ t: 0, bodyX: 8, rotation: -.16, frontHandX: 60, backHandX: 38 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -11, bodyY: 3, rotation: .18, scaleX: 1.14, scaleY: .88, frontHandX: -10, frontHandY: -13, backHandX: -21, backHandY: 9, frontFootX: 20, backFootX: -23 }],
+    active: [{ t: 0, bodyX: -11, bodyY: 3, rotation: .18, frontHandX: -10, frontHandY: -13, backHandX: -21, backHandY: 9 }, { t: .35, bodyX: 13, bodyY: 1, rotation: -.27, frontHandX: 70, frontHandY: -14, backHandX: 40, backHandY: 8, frontFootX: 27, backFootX: -20 }, { t: 1, bodyX: 8, rotation: -.16, frontHandX: 60, frontHandY: -11, backHandX: 34, backHandY: 7, frontFootX: 24, backFootX: -19 }],
+    recovery: [{ t: 0, bodyX: 8, rotation: -.16, frontHandX: 60, frontHandY: -11, backHandX: 34, backHandY: 7, frontFootX: 24, backFootX: -19 }, { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   rush: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -7, bodyY: 5, rotation: .17, scaleX: 1.16, scaleY: .84, frontHandX: 15, frontHandY: -8, backHandX: -28, backHandY: 8, frontFootX: 18, backFootX: -24 }],
-    active: [{ t: 0, bodyX: -7 }, { t: .25, bodyX: 24, rotation: -.33, scaleX: 1.32, scaleY: .76, frontHandX: 24, frontHandY: -8, backHandX: -34, backHandY: 8, frontFootX: -2, backFootX: -29 }, { t: 1, bodyX: 18, rotation: -.24, scaleX: 1.22, scaleY: .82 }],
-    recovery: [{ t: 0, bodyX: 18, rotation: -.24, scaleX: 1.22, scaleY: .82 }, { t: 1 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -8, bodyY: 6, rotation: .18, scaleX: 1.16, scaleY: .84, frontHandX: 18, frontHandY: -5, backHandX: -31, backHandY: 7, frontFootX: 20, backFootX: -27 }],
+    active: [{ t: 0, bodyX: -8, bodyY: 6, rotation: .18, frontHandX: 18, frontHandY: -5, backHandX: -31, backHandY: 7 }, { t: .25, bodyX: 24, bodyY: 4, rotation: -.33, scaleX: 1.32, scaleY: .76, frontHandX: 28, frontHandY: -5, backHandX: -37, backHandY: 7, frontFootX: 0, backFootX: -31 }, { t: 1, bodyX: 18, bodyY: 4, rotation: -.24, scaleX: 1.22, scaleY: .82, frontHandX: 26, frontHandY: -4, backHandX: -33, backHandY: 6, frontFootX: 4, backFootX: -28 }],
+    recovery: [{ t: 0, bodyX: 18, bodyY: 4, rotation: -.24, scaleX: 1.22, scaleY: .82, frontHandX: 26, frontHandY: -4, backHandX: -33, backHandY: 6, frontFootX: 4, backFootX: -28 }, { t: 1, bodyX: 0, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   rise: {
-    startup: [{ t: 0 }, { t: 1, bodyY: 8, scaleX: 1.18, scaleY: .8, frontHandX: 10, frontHandY: 5, backHandX: -9, backHandY: 7, frontFootX: 16, backFootX: -16 }],
-    active: [{ t: 0, bodyY: 8 }, { t: .25, bodyY: -20, scaleX: .72, scaleY: 1.42, frontHandX: 10, frontHandY: -62, backHandX: -9, backHandY: -48, frontFootX: 7, frontFootLift: 14, backFootX: -6, backFootLift: 18 }, { t: 1, bodyY: -13, scaleX: .82, scaleY: 1.28, frontHandY: -53, backHandY: -42 }],
-    recovery: [{ t: 0, bodyY: -13, scaleX: .82, scaleY: 1.28, frontHandY: -53, backHandY: -42 }, { t: 1, frontFootLift: 5, backFootLift: 8 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -2, bodyY: 9, rotation: .035, scaleX: 1.18, scaleY: .8, frontHandX: -5, frontHandY: 7, backHandX: -16, backHandY: 6, frontFootX: 19, backFootX: -20 }],
+    active: [{ t: 0, bodyX: -2, bodyY: 9, rotation: .035, frontHandX: -5, frontHandY: 7, backHandX: -16, backHandY: 6 }, { t: .25, bodyX: 3, bodyY: -20, rotation: -.06, scaleX: .72, scaleY: 1.42, frontHandX: 12, frontHandY: -62, backHandX: -14, backHandY: -34, frontFootX: 8, frontFootLift: 14, backFootX: -7, backFootLift: 18 }, { t: 1, bodyX: 2, bodyY: -13, rotation: -.035, scaleX: .82, scaleY: 1.28, frontHandX: 13, frontHandY: -53, backHandX: -16, backHandY: -29, frontFootX: 10, frontFootLift: 10, backFootX: -9, backFootLift: 14 }],
+    recovery: [{ t: 0, bodyX: 2, bodyY: -13, rotation: -.035, scaleX: .82, scaleY: 1.28, frontHandX: 13, frontHandY: -53, backHandX: -16, backHandY: -29, frontFootX: 10, frontFootLift: 10, backFootX: -9, backFootLift: 14 }, { t: 1, bodyX: 0, bodyY: -1, rotation: .01, scaleX: 1, scaleY: 1, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   counterGuard: {
     startup: [
@@ -1221,46 +1303,46 @@ const TILT_ATTACK_KEYFRAMES = Object.freeze({
   tiltSide: {
     startup: [
       { t: 0 },
-      { t: 1, bodyX: -3, bodyY: 2, rotation: .07, scaleX: 1.04, scaleY: .96, frontHandX: 5, frontHandY: -5, backHandX: -14, backHandY: 5, frontFootX: 16, backFootX: -17 }
+      { t: 1, bodyX: -3, bodyY: 2, rotation: .075, scaleX: 1.04, scaleY: .96, frontHandX: 3, frontHandY: -3, backHandX: -19, backHandY: 3, frontFootX: 17, backFootX: -19 }
     ],
     active: [
-      { t: 0, bodyX: -3, bodyY: 2, rotation: .07, frontHandX: 5, frontHandY: -5, backHandX: -14, backHandY: 5, frontFootX: 16, backFootX: -17 },
-      { t: .35, bodyX: 7, rotation: -.1, scaleX: 1.07, scaleY: .94, frontHandX: 55, frontHandY: -6, backHandX: -13, backHandY: 6, frontFootX: 22, backFootX: -16 },
-      { t: 1, bodyX: 5, rotation: -.07, frontHandX: 49, frontHandY: -5, backHandX: -13, backHandY: 6, frontFootX: 20, backFootX: -16 }
+      { t: 0, bodyX: -3, bodyY: 2, rotation: .075, frontHandX: 3, frontHandY: -3, backHandX: -19, backHandY: 3, frontFootX: 17, backFootX: -19 },
+      { t: .35, bodyX: 7, rotation: -.1, scaleX: 1.07, scaleY: .94, frontHandX: 55, frontHandY: -5, backHandX: -20, backHandY: 2, frontFootX: 23, backFootX: -18 },
+      { t: 1, bodyX: 5, rotation: -.07, frontHandX: 49, frontHandY: -4, backHandX: -19, backHandY: 2, frontFootX: 21, backFootX: -18 }
     ],
     recovery: [
-      { t: 0, bodyX: 5, rotation: -.07, frontHandX: 49, frontHandY: -5, backHandX: -13, backHandY: 6, frontFootX: 20, backFootX: -16 },
-      { t: 1 }
+      { t: 0, bodyX: 5, rotation: -.07, frontHandX: 49, frontHandY: -4, backHandX: -19, backHandY: 2, frontFootX: 21, backFootX: -18 },
+      { t: 1, bodyX: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
     ]
   },
   tiltUp: {
     startup: [
       { t: 0 },
-      { t: 1, bodyY: 4, scaleX: 1.07, scaleY: .9, frontHandX: 12, frontHandY: 1, backHandX: -10, backHandY: 5, frontFootX: 16, backFootX: -16 }
+      { t: 1, bodyX: -1, bodyY: 5, rotation: .025, scaleX: 1.07, scaleY: .9, frontHandX: 3, frontHandY: 3, backHandX: -17, backHandY: 4, frontFootX: 18, backFootX: -19 }
     ],
     active: [
-      { t: 0, bodyY: 4, scaleX: 1.07, scaleY: .9, frontHandX: 12, frontHandY: 1, backHandX: -10, backHandY: 5, frontFootX: 16, backFootX: -16 },
-      { t: .35, bodyY: -6, rotation: -.04, scaleX: .94, scaleY: 1.1, frontHandX: 10, frontHandY: -48, backHandX: -9, backHandY: -28, frontFootX: 14, backFootX: -14 },
-      { t: 1, bodyY: -3, scaleX: .97, scaleY: 1.06, frontHandX: 11, frontHandY: -42, backHandX: -9, backHandY: -24 }
+      { t: 0, bodyX: -1, bodyY: 5, rotation: .025, scaleX: 1.07, scaleY: .9, frontHandX: 3, frontHandY: 3, backHandX: -17, backHandY: 4, frontFootX: 18, backFootX: -19 },
+      { t: .35, bodyX: 2, bodyY: -6, rotation: -.045, scaleX: .94, scaleY: 1.1, frontHandX: 11, frontHandY: -48, backHandX: -17, backHandY: -24, frontFootX: 15, backFootX: -16 },
+      { t: 1, bodyX: 1, bodyY: -3, rotation: -.025, scaleX: .97, scaleY: 1.06, frontHandX: 12, frontHandY: -42, backHandX: -18, backHandY: -20 }
     ],
     recovery: [
-      { t: 0, bodyY: -3, scaleX: .97, scaleY: 1.06, frontHandX: 11, frontHandY: -42, backHandX: -9, backHandY: -24 },
-      { t: 1 }
+      { t: 0, bodyX: 1, bodyY: -3, rotation: -.025, scaleX: .97, scaleY: 1.06, frontHandX: 12, frontHandY: -42, backHandX: -18, backHandY: -20 },
+      { t: 1, bodyX: 0, bodyY: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
     ]
   },
   tiltDown: {
     startup: [
       { t: 0 },
-      { t: 1, bodyY: 7, scaleX: 1.12, scaleY: .82, frontHandX: 17, frontHandY: 7, backHandX: -15, backHandY: 7, frontFootX: 17, backFootX: -17 }
+      { t: 1, bodyX: -1, bodyY: 8, rotation: .04, scaleX: 1.12, scaleY: .82, frontHandX: 14, frontHandY: 5, backHandX: -20, backHandY: 6, frontFootX: 19, backFootX: -20 }
     ],
     active: [
-      { t: 0, bodyY: 7, scaleX: 1.12, scaleY: .82, frontHandX: 17, frontHandY: 7, backHandX: -15, backHandY: 7, frontFootX: 17, backFootX: -17 },
-      { t: .35, bodyY: 8, rotation: -.04, scaleX: 1.16, scaleY: .78, frontHandX: 25, frontHandY: 13, backHandX: -20, backHandY: 12, frontFootX: 50, frontFootLift: 3, backFootX: -16 },
-      { t: 1, bodyY: 7, scaleX: 1.12, scaleY: .82, frontHandX: 23, frontHandY: 11, backHandX: -18, backHandY: 10, frontFootX: 43, frontFootLift: 2, backFootX: -16 }
+      { t: 0, bodyX: -1, bodyY: 8, rotation: .04, scaleX: 1.12, scaleY: .82, frontHandX: 14, frontHandY: 5, backHandX: -20, backHandY: 6, frontFootX: 19, backFootX: -20 },
+      { t: .35, bodyX: 3, bodyY: 8, rotation: -.05, scaleX: 1.16, scaleY: .78, frontHandX: -2, frontHandY: 10, backHandX: -24, backHandY: 11, frontFootX: 50, frontFootLift: 3, backFootX: -18 },
+      { t: 1, bodyX: 2, bodyY: 7, rotation: -.03, scaleX: 1.12, scaleY: .82, frontHandX: 5, frontHandY: 8, backHandX: -22, backHandY: 9, frontFootX: 43, frontFootLift: 2, backFootX: -18 }
     ],
     recovery: [
-      { t: 0, bodyY: 7, scaleX: 1.12, scaleY: .82, frontHandX: 23, frontHandY: 11, backHandX: -18, backHandY: 10, frontFootX: 43, frontFootLift: 2, backFootX: -16 },
-      { t: 1 }
+      { t: 0, bodyX: 2, bodyY: 7, rotation: -.03, scaleX: 1.12, scaleY: .82, frontHandX: 5, frontHandY: 8, backHandX: -22, backHandY: 9, frontFootX: 43, frontFootLift: 2, backFootX: -18 },
+      { t: 1, bodyX: 0, bodyY: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
     ]
   }
 });
@@ -1291,6 +1373,7 @@ function attackPhaseFrames(profile, phase) {
 }
 
 function attackKeyframeProfile(action, motion, variant) {
+  if (action === 'ultimate') return variant === 'blaze' ? 'rush' : 'cast';
   if (motion === 'counter') return variant === 'counterSuccess' ? 'counterStrike' : 'counterGuard';
   if (action === 'getupAttack' || motion === 'getupSweep') return 'getupAttack';
   if (variant === 'tilt') {
@@ -1437,7 +1520,22 @@ function drawAttackEffect(player, action, color, age, phase, progress, fighter) 
   ctx.fillStyle = color;
   ctx.lineWidth = action.startsWith('special') ? 10 : 6;
   ctx.shadowColor = color; ctx.shadowBlur = 14;
-  if (action.startsWith('special') && phase) {
+  if (action === 'ultimate' && phase) {
+    const charge = phase === 'startup' ? progress : phase === 'active' ? 1 : 1 - progress;
+    ctx.globalAlpha = .24 + charge * .7;ctx.strokeStyle = phase === 'active' ? '#ffffff' : color;ctx.fillStyle=color;
+    if(fighter.id==='blaze'){
+      const direction=player.face,reach=phase==='active'?190:65+charge*55;ctx.lineWidth=4+charge*5;
+      for(let lane=-2;lane<=2;lane++){ctx.beginPath();ctx.moveTo(-direction*reach,lane*15);ctx.lineTo(direction*(20+charge*42),lane*5);ctx.stroke();}
+      ctx.globalAlpha*=.42;ctx.beginPath();ctx.moveTo(-direction*reach,-42);ctx.lineTo(direction*62,0);ctx.lineTo(-direction*reach,42);ctx.closePath();ctx.fill();
+    }else if(fighter.id==='volt'){
+      ctx.lineWidth=3+charge*4;for(let index=-2;index<=2;index++){const x=index*17;ctx.beginPath();ctx.moveTo(x,-player.height*.76);ctx.lineTo(x-8,player.height*.56);ctx.stroke();}
+    }else if(fighter.id==='bolt'){
+      ctx.lineWidth=3+charge*4;for(let lane=-1;lane<=1;lane++){ctx.beginPath();ctx.moveTo(-player.face*(55+charge*55),lane*18);ctx.lineTo(player.face*(28+charge*28),lane*6);ctx.stroke();}
+    }else{
+      ctx.lineWidth=2.5+charge*3;for(let index=0;index<10;index++){const a=index*Math.PI*.2,distance=70-charge*42;const x=Math.cos(a)*distance,y=Math.sin(a)*distance;ctx.fillStyle=index%3===0?'#ffffff':color;ctx.fillRect(x-3,y-3,6,6);}
+      ctx.fillStyle='rgba(4,2,12,.78)';ctx.fillRect(-14,-14,28,28);
+    }
+  } else if (action.startsWith('special') && phase) {
     drawSpecialEffect(player, fighter, action, color, phase, progress);
   } else if (player.chargeFrames) {
     const charge = clamp((player.chargeFrames - 10) / 80, 0, 1);
@@ -1574,7 +1672,7 @@ function drawPlayer(p, dt) {
   const moveMotion = p.actionMotion || fighter.moves[action]?.motion || '';
   const counterSuccess = p.actionVariant === 'counterSuccess';
   const cueAge = localCue ? performance.now() - localCue.started : 999;
-  const attack = /ground|air|special|item|throw|grab|pummel|getupAttack|dashAttack/.test(action);
+  const attack = /ground|air|special|ultimate|item|throw|grab|pummel|getupAttack|dashAttack/.test(action);
   const up = action.includes('Up'), down = action.includes('Down'), side = action.includes('Side') || action.includes('Forward') || action.includes('Back') || action === 'dashAttack';
   const cueMove = fighter.moves[action] || { startup: 3, active: 3, recovery: 8 };
   const cueFrame = cueAge / (1000 / 60), cueActiveStart = cueMove.startup, cueRecoveryStart = cueMove.startup + cueMove.active;
@@ -2093,20 +2191,78 @@ function drawPlayer(p, dt) {
   }
 }
 function drawBattleHUD(){
-  const count=Math.max(1,players.length),gap=10,cardW=Math.min(286,(WORLD_W-36-gap*(count-1))/count),total=cardW*count+gap*(count-1),startX=(WORLD_W-total)/2,y=WORLD_H-96;
+  const count=Math.max(1,players.length),gap=count===4?8:12,maxCard=count<=2?340:count===3?320:294;
+  const cardW=Math.min(maxCard,(WORLD_W-30-gap*(count-1))/count),cardH=96;
+  const total=cardW*count+gap*(count-1),startX=(WORLD_W-total)/2,y=WORLD_H-cardH-10;
+  const pulse=.72+Math.sin(performance.now()/115)*.28;
   players.forEach((p,index)=>{
-    const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0],color=fighter.palettes[p.palette%fighter.palettes.length],x=startX+index*(cardW+gap),danger=clamp(p.damage/160,0,1);
-    ctx.save();ctx.globalAlpha=p.eliminated?.48:1;ctx.fillStyle='rgba(5,8,18,.9)';ctx.beginPath();ctx.roundRect(x,y,cardW,78,10);ctx.fill();ctx.strokeStyle=p.i===myIndex?'rgba(255,255,255,.82)':'rgba(255,255,255,.13)';ctx.lineWidth=p.i===myIndex?2:1;ctx.stroke();
-    const portrait=ctx.createLinearGradient(x,y,x+62,y+70);portrait.addColorStop(0,color);portrait.addColorStop(1,'rgba(10,13,28,.3)');ctx.fillStyle=portrait;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+72,y);ctx.lineTo(x+55,y+78);ctx.lineTo(x,y+78);ctx.closePath();ctx.fill();ctx.fillStyle='#08101d';ctx.font='900 27px Inter';ctx.textAlign='center';ctx.fillText(fighter.icon,x+28,y+48);
-    ctx.textAlign='left';ctx.fillStyle='#fff';ctx.font='900 11px Inter';ctx.fillText(`${playerTag(p)}  ${fighter.name}${p.i===myIndex?'  YOU':''}`,x+70,y+18);
-    ctx.fillStyle=`rgb(${Math.round(245+10*danger)},${Math.round(245-175*danger)},${Math.round(255-190*danger)})`;ctx.font='900 34px Inter';ctx.fillText(`${Math.round(p.damage)}%`,x+68,y+55);
-    const lifeDisplay=rules.mode==='training'?'∞':rules.mode==='time'?`${p.score>=0?'+':''}${p.score}`:'◆'.repeat(Math.max(0,p.stocks));
-    ctx.textAlign='right';ctx.fillStyle=color;ctx.font='900 13px Inter';ctx.fillText(lifeDisplay,x+cardW-12,y+52);
-    ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(x+70,y+66,cardW-84,5);ctx.fillStyle=p.shield<30?'#ff426a':'#72eaff';ctx.fillRect(x+70,y+66,(cardW-84)*clamp(p.shield/100,0,1),5);ctx.restore();
+    const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];
+    const color=fighter.palettes[p.palette%fighter.palettes.length];
+    const x=startX+index*(cardW+gap),damage=Math.max(0,Math.round(p.damage)),danger=clamp(p.damage/160,0,1);
+    const shield=clamp((p.shield||0)/100,0,1),ultimate=clamp((p.ultimateMeter||0)/100,0,1);
+    const damageColor=danger<.48?'#ffffff':danger<.82?'#ffd35d':'#ff496f';
+    const barX=x+166,barW=Math.max(72,cardW-178);
+    ctx.save();
+    ctx.globalAlpha=p.eliminated?.42:1;
+    ctx.shadowColor='rgba(0,0,0,.62)';ctx.shadowBlur=18;ctx.shadowOffsetY=7;
+    const shell=ctx.createLinearGradient(x,y,x,y+cardH);
+    shell.addColorStop(0,'rgba(26,31,47,.96)');shell.addColorStop(.52,'rgba(10,14,27,.96)');shell.addColorStop(1,'rgba(4,7,15,.98)');
+    ctx.fillStyle=shell;ctx.beginPath();ctx.moveTo(x+10,y);ctx.lineTo(x+cardW-8,y);ctx.lineTo(x+cardW,y+8);ctx.lineTo(x+cardW,y+cardH-8);ctx.lineTo(x+cardW-9,y+cardH);ctx.lineTo(x,y+cardH);ctx.lineTo(x,y+10);ctx.closePath();ctx.fill();
+    ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+    ctx.strokeStyle=p.i===myIndex?color:'rgba(255,255,255,.17)';ctx.lineWidth=p.i===myIndex?2.2:1;
+    ctx.beginPath();ctx.moveTo(x+10,y);ctx.lineTo(x+cardW-8,y);ctx.lineTo(x+cardW,y+8);ctx.lineTo(x+cardW,y+cardH-8);ctx.lineTo(x+cardW-9,y+cardH);ctx.lineTo(x,y+cardH);ctx.lineTo(x,y+10);ctx.closePath();ctx.stroke();
+    ctx.fillStyle=color;ctx.fillRect(x+10,y,x+cardW-18,3);
+
+    const portraitX=x+48,portraitY=y+50;
+    ctx.save();ctx.beginPath();ctx.arc(portraitX,portraitY,38,0,Math.PI*2);ctx.clip();
+    const portrait=ctx.createRadialGradient(portraitX-9,portraitY-12,5,portraitX,portraitY,42);
+    portrait.addColorStop(0,'#ffffff');portrait.addColorStop(.12,color);portrait.addColorStop(1,'rgba(8,11,23,.96)');
+    ctx.fillStyle=portrait;ctx.fillRect(portraitX-42,portraitY-42,84,84);
+    ctx.globalAlpha=.22;ctx.strokeStyle='#fff';ctx.lineWidth=2;
+    for(let stripe=-54;stripe<54;stripe+=12){ctx.beginPath();ctx.moveTo(portraitX+stripe,portraitY+42);ctx.lineTo(portraitX+stripe+54,portraitY-42);ctx.stroke();}
+    ctx.globalAlpha=1;ctx.fillStyle='#070c19';ctx.font='900 31px Inter';ctx.textAlign='center';ctx.fillText(fighter.icon,portraitX,portraitY+11);ctx.restore();
+    ctx.strokeStyle=color;ctx.lineWidth=3;ctx.beginPath();ctx.arc(portraitX,portraitY,38,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='rgba(3,6,14,.9)';ctx.beginPath();ctx.roundRect(x+16,y+74,65,17,8);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='900 8px Inter';ctx.textAlign='center';ctx.fillText(fighter.name,x+48,y+85);
+
+    ctx.textAlign='left';ctx.fillStyle='#f7f8ff';ctx.font='900 10px Inter';
+    const tag=String(playerTag(p)).slice(0,count===4?12:18);ctx.fillText(tag,x+91,y+17);
+    if(p.i===myIndex){ctx.fillStyle=color;ctx.font='900 7px Inter';ctx.fillText('YOU',x+91,y+28);}
+    ctx.fillStyle=damageColor;ctx.shadowColor=damageColor;ctx.shadowBlur=danger>.8?9*pulse:0;
+    ctx.font='900 43px Inter';const damageText=String(damage);ctx.fillText(damageText,x+88,y+66);
+    const damageWidth=ctx.measureText(damageText).width;ctx.shadowBlur=0;ctx.font='900 17px Inter';ctx.fillText('%',x+91+damageWidth,y+65);
+
+    ctx.textAlign='right';ctx.fillStyle='rgba(255,255,255,.72)';ctx.font='900 7px Inter';ctx.fillText(rules.mode==='time'?'SCORE':'STOCK',x+cardW-12,y+16);
+    const lifeDisplay=rules.mode==='training'?'∞':rules.mode==='time'?`${p.score>=0?'+':''}${p.score}`:`×${Math.max(0,p.stocks)}`;
+    ctx.fillStyle=color;ctx.font='900 15px Inter';ctx.fillText(lifeDisplay,x+cardW-12,y+31);
+
+    ctx.textAlign='left';ctx.font='900 6px Inter';ctx.fillStyle=shield<.3?'#ff5b78':'#8deeff';ctx.fillText('GUARD',barX,y+47);
+    ctx.fillStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.roundRect(barX,y+51,barW,8,4);ctx.fill();
+    const shieldGradient=ctx.createLinearGradient(barX,y+51,barX+barW,y+51);
+    shieldGradient.addColorStop(0,shield<.3?'#ff3c65':'#55d9ff');shieldGradient.addColorStop(1,shield<.3?'#ff9a58':'#d8fbff');
+    ctx.fillStyle=shieldGradient;if(shield>0){ctx.beginPath();ctx.roundRect(barX,y+51,Math.max(4,barW*shield),8,4);ctx.fill();}
+    ctx.textAlign='right';ctx.fillStyle='rgba(255,255,255,.72)';ctx.font='900 6px Inter';ctx.fillText(`${Math.round(shield*100)}`,barX+barW,y+47);
+
+    ctx.textAlign='left';ctx.fillStyle=ultimate>=1?'#fff7ae':color;ctx.font='900 6px Inter';ctx.fillText(ultimate>=1?'FINAL READY':'FINAL',barX,y+70);
+    ctx.fillStyle='rgba(255,255,255,.11)';ctx.beginPath();ctx.roundRect(barX,y+74,barW,11,3);ctx.fill();
+    if(ultimate>0){
+      const finalGradient=ctx.createLinearGradient(barX,y+74,barX+barW,y+74);
+      finalGradient.addColorStop(0,color);finalGradient.addColorStop(.72,ultimate>=1?'#fff36b':'#ff6ed5');finalGradient.addColorStop(1,'#ffffff');
+      ctx.fillStyle=finalGradient;ctx.shadowColor=ultimate>=1?'#fff36b':color;ctx.shadowBlur=ultimate>=1?14*pulse:5;
+      ctx.beginPath();ctx.roundRect(barX,y+74,Math.max(4,barW*ultimate),11,3);ctx.fill();ctx.shadowBlur=0;
+    }
+    ctx.strokeStyle='rgba(5,8,18,.62)';ctx.lineWidth=1;
+    for(let segment=1;segment<4;segment++){const sx=barX+barW*segment/4;ctx.beginPath();ctx.moveTo(sx,y+74);ctx.lineTo(sx,y+85);ctx.stroke();}
+    if(ultimate>=1){ctx.fillStyle='#fff';ctx.font='900 7px Inter';ctx.textAlign='right';ctx.fillText('Z + X',barX+barW,y+70);}
+    ctx.restore();
   });
-  if(state==='playing'){ctx.save();ctx.fillStyle='rgba(5,8,18,.84)';ctx.beginPath();ctx.roundRect(520,10,240,38,19);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.14)';ctx.stroke();ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='900 19px Inter';ctx.fillText(formatTime(remainingTicks),640,35);ctx.textAlign='left';ctx.fillStyle=stage.color;ctx.font='900 9px Inter';ctx.fillText(stage.name,535,33);ctx.textAlign='right';ctx.fillStyle=ping<70?'#67f59b':ping<130?'#ffca3a':'#ff426a';ctx.fillText(`${Math.round(ping)}ms`,744,33);ctx.restore();}
+  if(state==='playing'){
+    ctx.save();ctx.fillStyle='rgba(5,8,18,.88)';ctx.beginPath();ctx.roundRect(520,10,240,38,19);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.16)';ctx.stroke();
+    ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='900 19px Inter';ctx.fillText(formatTime(remainingTicks),640,35);
+    ctx.textAlign='left';ctx.fillStyle=stage.color;ctx.font='900 9px Inter';ctx.fillText(stage.name,535,33);
+    ctx.textAlign='right';ctx.fillStyle=ping<70?'#67f59b':ping<130?'#ffca3a':'#ff426a';ctx.fillText(`${Math.round(ping)}ms`,744,33);ctx.restore();
+  }
 }
-function drawHUD(){const width=Math.min(245,(WORLD_W-36)/4-8);players.forEach((p,index)=>{const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0],x=18+index*((WORLD_W-36)/4),y=WORLD_H-92;ctx.fillStyle='rgba(7,9,17,.84)';ctx.fillRect(x,y,width,70);ctx.fillStyle=fighter.color;ctx.fillRect(x,y,5,70);ctx.fillStyle=p.eliminated?'#596077':'#fff';ctx.font='900 11px Inter';ctx.textAlign='left';ctx.fillText(`${playerTag(p)} ${fighter.name}${p.i===myIndex?' · YOU':''}`,x+14,y+18);ctx.font='900 29px Inter';ctx.fillText(`${Math.round(p.damage)}%`,x+13,y+50);ctx.textAlign='right';ctx.font='900 13px Inter';ctx.fillStyle=fighter.color;ctx.fillText(rules.mode==='time'?`${p.score>=0?'+':''}${p.score}`:'●'.repeat(Math.max(0,p.stocks)),x+width-10,y+49);if(!p.eliminated){ctx.fillStyle='rgba(255,255,255,.12)';ctx.fillRect(x+14,y+60,width-28,4);ctx.fillStyle=p.shield<30?'#ff466f':'#7ce8ff';ctx.fillRect(x+14,y+60,(width-28)*Math.max(0,p.shield)/100,4);}});ctx.fillStyle='#aeb4cc';ctx.font='800 11px Inter';ctx.textAlign='center';ctx.fillText(`${stage.name}  ·  ${formatTime(remainingTicks)}  ·  ${Math.round(ping)}ms`,640,24);}
 function drawOffscreen(){for(const p of players){if(p.eliminated||p.respawn>0||p.x>=0&&p.x<=WORLD_W&&p.y>=0&&p.y<=WORLD_H)continue;const x=clamp(p.x,25,WORLD_W-25),y=clamp(p.y,25,WORLD_H-110),fighter=FIGHTERS.find(item=>item.id===p.characterId);ctx.fillStyle=fighter.color;ctx.beginPath();ctx.arc(x,y,14,0,Math.PI*2);ctx.fill();ctx.fillStyle='#080a12';ctx.font='900 9px Inter';ctx.textAlign='center';ctx.fillText(playerTag(p),x,y+3);}}
 function drawCameraIndicators(){const zoom=camera.zoom+cameraPunch;for(const p of players){if(p.eliminated||p.respawn>0)continue;const sx=(p.x-camera.x)*zoom+WORLD_W/2,sy=(p.y-camera.y)*zoom+WORLD_H/2;if(sx>25&&sx<WORLD_W-25&&sy>25&&sy<WORLD_H-112)continue;const x=clamp(sx,28,WORLD_W-28),y=clamp(sy,28,WORLD_H-116),fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0],color=fighter.palettes[p.palette%fighter.palettes.length];ctx.save();ctx.shadowBlur=14;ctx.shadowColor=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y-16);ctx.lineTo(x+15,y+12);ctx.lineTo(x-15,y+12);ctx.closePath();ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#080a12';ctx.font='900 9px Inter';ctx.textAlign='center';ctx.fillText(playerTag(p),x,y+6);ctx.restore();}}
 function burst(x,y,color,count,speed,direction=0,scale=1){for(let i=0;i<count;i++){const forward=i<count*.66,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?1.8:2.55),s=speed*(.3+Math.random()*.82),duration=.19+Math.random()*.15;particles.push({x:x+(Math.random()-.5)*7,y:y+(Math.random()-.5)*7,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%4===0?color:'#ffffff',size:(1.8+Math.random()*2.5)*scale,gravity:42+Math.random()*65});}if(particles.length>96)particles.splice(0,particles.length-96);}
@@ -2129,6 +2285,7 @@ trainingPanel.querySelector('[data-training="pause"]').addEventListener('click',
 trainingPanel.querySelector('[data-training="hitboxes"]').addEventListener('click',event=>{hitboxes=!hitboxes;event.currentTarget.classList.toggle('active',hitboxes);event.currentTarget.setAttribute('aria-pressed',String(hitboxes));socket.emit('training:command',{type:'hitboxes',value:hitboxes});});
 document.querySelector('#cpu-select').addEventListener('change',event=>socket.emit('training:command',{type:'cpu',value:event.target.value}));
 trainingFighterSelect.addEventListener('change', event => selectCharacter(event.target.value));
+trainingBotSelect.addEventListener('change', event => socket.emit('training:command', { type: 'bot-character', value: event.target.value }));
 trainingTutorialToggle.addEventListener('click',()=>tutorialState.active?closeTutorial():openTutorial());
 document.querySelector('#tutorial-close').addEventListener('click',closeTutorial);
 document.querySelector('#tutorial-restart').addEventListener('click',()=>{socket.emit('training:command',{type:'reset'});beginTutorialStep(0);});
@@ -2148,14 +2305,19 @@ addEventListener('keydown',event=>{
     const cueLocked = !self || self.eliminated || self.respawn > 0 || self.hitstop > 0 || self.stun > 0 || self.dodgeFrames > 0 || self.landingLag > 0 || self.shieldStun > 0 || self.shieldDropLag > 0 || self.knockdownFrames > 0 || self.shielding || self.ledge || self.grabbedBy != null || self.grabbing != null || self.actionPhase;
     const specialKey = event.code === 'KeyX' || event.code === 'KeyG';
     const attackKey = event.code === 'KeyZ' || event.code === 'KeyF';
-    if (attackKey && !airborne && !cueLocked) {
+    const ultimateCombo = !cueLocked && (self?.ultimateMeter || 0) >= 100
+      && (keys.has('KeyZ') || keys.has('KeyF')) && (keys.has('KeyX') || keys.has('KeyG'));
+    if (ultimateCombo) {
+      localAttackIntent = null;
+      localCue = { name: 'ultimate', variant: self.characterId, started: performance.now(), seq: inputSeq + 1 };
+    } else if (attackKey && !airborne && !cueLocked) {
       localAttackIntent = {
         started: performance.now(),
         directional: up || down || side,
         name: up ? 'groundUp' : down ? 'groundDown' : side ? 'groundSide' : 'groundNeutral'
       };
     }
-    if (!cueLocked && !(specialKey && up && self.recoveryAvailable === false) && (airborne || !attackKey && !specialKey)) {
+    if (!ultimateCombo && !cueLocked && !(specialKey && up && self.recoveryAvailable === false) && (airborne || !attackKey && !specialKey)) {
       let name = airborne ? 'airDodge' : 'grab';
       if (specialKey) name = up ? 'specialUp' : down ? 'specialDown' : side ? 'specialSide' : 'specialNeutral';
       if (attackKey) name = airborne ? (up ? 'airUp' : down ? 'airDown' : side ? Math.sign(readInput().horizontal || self.face) === self.face ? 'airForward' : 'airBack' : 'airNeutral') : (up ? 'groundUp' : down ? 'groundDown' : side ? 'groundSide' : 'groundNeutral');

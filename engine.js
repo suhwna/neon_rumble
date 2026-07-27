@@ -10,6 +10,31 @@ const ACTION_BUFFER_FRAMES = 10;
 const JUMP_BUFFER_FRAMES = 10;
 const SMASH_HOLD_FRAMES = 10;
 const PARRY_FRAMES = 5;
+const ULTIMATE_READY = 100;
+const ULTIMATE_MOVES = Object.freeze({
+  volt: {
+    motion: 'ultimateVolt', startup: 28, active: 3, recovery: 30,
+    damage: 30, kx: 535, ky: 330, hitstop: 12, knockbackGrowth: 1.32,
+    projectileOnly: true, ultimateKind: 'volt'
+  },
+  blaze: {
+    motion: 'ultimateBlaze', startup: 16, active: 10, recovery: 38,
+    damage: 36, kx: 650, ky: 285, hitstop: 13, knockbackGrowth: 1.38,
+    reachX: 158, reachY: 86, dash: 'ultimate', dashSpeed: 850,
+    startupDrag: .5, recoveryDrag: .48, armor: true, armorThreshold: 12,
+    ultimateKind: 'blaze'
+  },
+  bolt: {
+    motion: 'ultimateBolt', startup: 13, active: 2, recovery: 31,
+    damage: 31, kx: 575, ky: 245, hitstop: 12, knockbackGrowth: 1.34,
+    projectileOnly: true, ultimateKind: 'bolt'
+  },
+  nova: {
+    motion: 'ultimateNova', startup: 24, active: 3, recovery: 36,
+    damage: 29, kx: 470, ky: 365, hitstop: 12, knockbackGrowth: 1.3,
+    projectileOnly: true, ultimateKind: 'nova'
+  }
+});
 const bit = (buttons, flag) => (buttons & flag) !== 0;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const approach = (value, target, amount) => value < target ? Math.min(target, value + amount) : Math.max(target, value - amount);
@@ -53,6 +78,7 @@ function createPlayer(entry, index, count, rules) {
     grabbedBy: null, grabbing: null, grabFrames: 0, grabEscape: 0, grabPummelCooldown: 0, pendingThrow: null,
     comboCount: 0, comboTimer: 0, comboAttacker: null, lastDamager: null, staleQueue: [], jabStep: 0, jabTimer: 0,
     charge: null, heldItem: null, jumpBuff: 0, jumpBuffMultiplier: 1, projectileCooldown: 0, projectileCooldownMax: 0,
+    ultimateMeter: rules.mode === 'training' ? ULTIMATE_READY : 0,
     respawn: 0, eliminated: false, disconnected: false,
     lastInput: { buttons: 0, horizontal: 0, vertical: 0, seq: 0 },
     ackSeq: 0, lastTapLeft: -999, lastTapRight: -999,
@@ -69,7 +95,8 @@ function createWorld(options = {}) {
   const stage = STAGES.find(item => item.id === rules.stageId);
   const roster = options.roster || [];
   return {
-    tick: 0, phase: 'countdown', countdown: 180, rules,
+    tick: 0, phase: rules.mode === 'training' ? 'active' : 'countdown',
+    countdown: rules.mode === 'training' ? 0 : 180, rules,
     remainingTicks: rules.timeSeconds * TICK_RATE,
     players: roster.map((entry, index) => createPlayer(entry, index, roster.length, rules)),
     platforms: stage.platforms.map(platform => ({ ...platform, baseX: platform.x, baseY: platform.y })),
@@ -146,7 +173,14 @@ function bufferActionInput(player, input, previous) {
   const directionalAction = pressed(input, previous, BUTTONS.ATTACK) || pressed(input, previous, BUTTONS.SPECIAL);
   if (pressed(input, previous, BUTTONS.UP) && (!directionalAction || input.vertical > -0.45)) player.jumpBuffer = JUMP_BUFFER_FRAMES;
   else if (player.jumpBuffer > 0 && player.hitstop === 0) player.jumpBuffer = bit(input.buttons, BUTTONS.UP) ? Math.max(1, player.jumpBuffer - 1) : player.jumpBuffer - 1;
-  if (pressed(input, previous, BUTTONS.GRAB)) player.actionBuffer = { type: 'grab', input: { ...input }, frames: ACTION_BUFFER_FRAMES };
+  const ultimatePressed = player.ultimateMeter >= ULTIMATE_READY
+    && bit(input.buttons, BUTTONS.ATTACK) && bit(input.buttons, BUTTONS.SPECIAL)
+    && (pressed(input, previous, BUTTONS.ATTACK) || pressed(input, previous, BUTTONS.SPECIAL));
+  if (ultimatePressed) player.actionBuffer = {
+    type: 'ultimate', input: { ...input }, frames: ACTION_BUFFER_FRAMES,
+    pendingHold: false, holdFrames: 0, triggerButton: BUTTONS.ATTACK | BUTTONS.SPECIAL
+  };
+  else if (pressed(input, previous, BUTTONS.GRAB)) player.actionBuffer = { type: 'grab', input: { ...input }, frames: ACTION_BUFFER_FRAMES };
   else if (pressed(input, previous, BUTTONS.SPECIAL)) player.actionBuffer = {
     type: 'special', input: { ...input }, frames: ACTION_BUFFER_FRAMES,
     pendingHold: false, holdFrames: 0, triggerButton: BUTTONS.SPECIAL
@@ -181,7 +215,7 @@ function bufferActionInput(player, input, previous) {
     } else {
       buffered.frames -= 1;
       if (buffered.frames <= 0) {
-        if (bit(input.buttons, heldButton)) {
+        if (buffered.type === 'ultimate' || bit(input.buttons, heldButton)) {
           buffered.frames = 1;
           buffered.input = { ...input };
         } else player.actionBuffer = null;
@@ -277,6 +311,45 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
   return true;
 }
 
+function startUltimate(world, player) {
+  if ((player.ultimateMeter || 0) < ULTIMATE_READY || player.action || player.eliminated || player.respawn > 0) return false;
+  const source = ULTIMATE_MOVES[player.characterId];
+  if (!source) return false;
+  const move = { ...source, name: 'ultimate', cancelWindow: 0 };
+  player.ultimateMeter = 0;
+  player.action = {
+    name: 'ultimate', move, variant: player.characterId,
+    frame: 0, startup: move.startup, hit: [], activated: false,
+    inputHorizontal: player.face, inputVertical: 0
+  };
+  player.actionName = 'ultimate';
+  player.actionBuffer = null; player.jumpBuffer = 0; player.shieldBuffer = 0;
+  player.shielding = false; player.parryFrames = 0; player.tumbling = false;
+  player.knockdownFrames = 0; player.vx *= player.grounded ? .35 : .75;
+  const color = colorOf(player);
+  if (move.ultimateKind === 'volt') {
+    world.entities.push({
+      id: world.nextEntityId++, type: 'ultimate', kind: 'ultimateVolt', owner: player.i,
+      x: clamp(player.x + player.face * 250, 80, WORLD_W - 80), y: player.y,
+      radius: 86, damage: move.damage, kx: move.kx, ky: move.ky,
+      knockbackGrowth: move.knockbackGrowth, hitstop: move.hitstop,
+      arm: move.startup, life: move.startup + 5, persistent: true,
+      color, hitPlayers: []
+    });
+  } else if (move.ultimateKind === 'nova') {
+    world.entities.push({
+      id: world.nextEntityId++, type: 'ultimate', kind: 'ultimateNova', owner: player.i,
+      x: clamp(player.x + player.face * 145, 100, WORLD_W - 100), y: player.y,
+      radius: 165, damage: move.damage, kx: move.kx, ky: move.ky,
+      knockbackGrowth: move.knockbackGrowth, hitstop: move.hitstop,
+      pullStrength: 1.35, arm: move.startup, life: move.startup + 6,
+      persistent: true, color, hitPlayers: []
+    });
+  }
+  emit(world, 'ultimate-start', { player: player.i, fighter: player.characterId, x: player.x, y: player.y });
+  return true;
+}
+
 function activateMove(world, player, action) {
   if (action.activated) return;
   action.activated = true;
@@ -304,6 +377,16 @@ function activateMove(world, player, action) {
   if (move.dash) player.vx = player.face * (move.dashSpeed || 500) * characterOf(player).speed;
   if (move.projectile) spawnProjectile(world, player, move);
   if (move.trap && move.trap !== true) spawnTrap(world, player, move);
+  if (move.ultimateKind === 'bolt') {
+    world.entities.push({
+      id: world.nextEntityId++, type: 'ultimateProjectile', kind: 'ultimateBolt', owner: player.i,
+      x: player.x + player.face * 42, y: player.y - 8,
+      vx: player.face * 780, vy: 0,
+      radius: 42, damage: move.damage, kx: move.kx, ky: move.ky,
+      knockbackGrowth: move.knockbackGrowth, hitstop: move.hitstop,
+      life: 92, persistent: true, color: colorOf(player), hitPlayers: []
+    });
+  }
 }
 
 function spawnProjectile(world, player, move) {
@@ -472,6 +555,7 @@ function hitPlayer(world, attacker, target, move, direction) {
     return true;
   }
   const moveName = move.name || move.kind || move.projectile || 'environment';
+  const ultimateHit = String(moveName).startsWith('ultimate');
   const stale = staleMultiplier(attacker, moveName);
   const shortHopMultiplier = move.shortHop ? 0.85 : 1;
   if (target.shielding) {
@@ -482,7 +566,11 @@ function hitPlayer(world, attacker, target, move, direction) {
     target.vx = direction * shieldPush; attacker.vx -= direction * Math.min(170, 18 + shieldDamage * 6);
     target.hitstop = Math.max(3, move.hitstop - 2); attacker.hitstop = 3;
     if (target.shield <= 0) { target.shield = 25; target.shielding = false; target.stun = 87; target.shieldLock = 120; emit(world, 'shield-break', { player: target.i }); }
-    else emit(world, 'shield-hit', { player: target.i, attacker: attacker.i });
+    else emit(world, 'shield-hit', {
+      player: target.i, attacker: attacker.i, ultimate: ultimateHit,
+      x: move.contactX ?? target.x, y: move.contactY ?? target.y,
+      color: colorOf(attacker)
+    });
     recordStale(attacker, moveName); target.hitId += 1; return true;
   }
   if (target.comboTimer <= 0 || target.comboAttacker !== attacker.i) {
@@ -505,6 +593,12 @@ function hitPlayer(world, attacker, target, move, direction) {
     && armorAction.frame < armorStartup + armorAction.move.active
     && damage <= armorThreshold;
   if (!armored) {
+    if (target.action?.name === 'ultimate') {
+      for (const entity of world.entities) {
+        if (entity.owner === target.i && entity.type === 'ultimate' && entity.arm > 0) entity.life = 0;
+      }
+      emit(world, 'ultimate-cancel', { player: target.i, attacker: attacker.i });
+    }
     if (target.grabbedBy != null) {
       const holder = world.players.find(player => player.i === target.grabbedBy);
       if (holder) releaseGrab(world, holder);
@@ -520,6 +614,8 @@ function hitPlayer(world, attacker, target, move, direction) {
     target.canLedgeInvincible = true; target.ledgeGrabs = 0;
   }
   target.damage += damage; target.comboCount += 1; target.comboTimer = 90; target.comboAttacker = attacker.i; recordStale(attacker, moveName);
+  if (!ultimateHit && attacker.i >= 0) attacker.ultimateMeter = clamp((attacker.ultimateMeter || 0) + damage * 1.15, 0, ULTIMATE_READY);
+  target.ultimateMeter = clamp((target.ultimateMeter || 0) + damage * 0.72, 0, ULTIMATE_READY);
   if (interruptedDropPlatform) {
     target.y = interruptedDropPlatform.y - target.height / 2;
     target.platformId = interruptedDropPlatform.id;
@@ -566,7 +662,7 @@ function hitPlayer(world, attacker, target, move, direction) {
   target.stun = armored ? 0 : Math.max(4, Math.round(baseHitstun * comboStunMultiplier));
   target.grounded = groundedFlinch; target.hitId += 1;
   if (!armored) target.tumbling = !groundedFlinch;
-  emit(world, 'hit', { attacker: attacker.i, player: target.i, damage, targetDamage: target.damage, comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y, power: move.hitstop, launchSpeed, launchAngle: Math.atan2(target.vy, target.vx), critical, finisherFlight, quality: move.sweet ? 'sweet' : 'normal', color: colorOf(attacker) });
+  emit(world, 'hit', { attacker: attacker.i, player: target.i, damage, targetDamage: target.damage, comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y, power: move.hitstop, launchSpeed, launchAngle: Math.atan2(target.vy, target.vx), critical, finisherFlight, ultimate: ultimateHit, move: moveName, quality: move.sweet ? 'sweet' : 'normal', color: colorOf(attacker) });
   return true;
 }
 
@@ -814,7 +910,7 @@ function performAirDodge(player, input) {
   const dodgeX = neutral ? 0 : input.horizontal / divisor;
   const dodgeY = neutral ? 0 : input.vertical / divisor;
   if (neutral) performDodge(player, 'airDodge', 42, 18, player.vx, player.vy, { neutral: true });
-  else performDodge(player, 'airDodge', 50, 14, dodgeX * 390, dodgeY * 360, { windupFrames: 4 });
+  else performDodge(player, 'airDodge', 44, 16, dodgeX * 430, dodgeY * 396, { windupFrames: 2 });
   return true;
 }
 
@@ -1176,7 +1272,9 @@ function updatePlayer(world, player, rawInput) {
   if (!locked && player.shieldDropLag === 0 && player.shieldStun === 0 && !player.shielding && player.actionBuffer && !player.actionBuffer.pendingHold) {
     const buffered = player.actionBuffer;
     player.actionBuffer = null;
-    if (buffered.type === 'grab') {
+    if (buffered.type === 'ultimate') {
+      startUltimate(world, player);
+    } else if (buffered.type === 'grab') {
       if (Math.abs(buffered.input.horizontal) > .35) player.face = Math.sign(buffered.input.horizontal);
       if (!pickupItem(world, player)) {
         if (player.grounded) beginGrab(world, player);
@@ -1454,7 +1552,7 @@ function updateEntities(world) {
     entity.life -= 1;
     entity.age = (entity.age || 0) + 1;
     if (entity.arm > 0) entity.arm -= 1;
-    if (entity.type === 'projectile' || entity.type === 'bomb') {
+    if (entity.type === 'projectile' || entity.type === 'bomb' || entity.type === 'ultimateProjectile') {
       entity.x += entity.vx / TICK_RATE; entity.y += entity.vy / TICK_RATE;
       if (entity.type === 'bomb') entity.vy += 22;
       if (entity.kind === 'star') { entity.y += Math.sin(entity.age * .42) * 2.2; entity.vx *= .996; }
@@ -1464,8 +1562,19 @@ function updateEntities(world) {
   resolveProjectileClashes(world);
   for (const entity of world.entities) {
     if (entity.life <= 0) continue;
-    if (entity.arm > 0) continue;
     const owner = world.players.find(player => player.i === entity.owner);
+    if (entity.kind === 'ultimateNova' && entity.arm > 0) {
+      for (const target of world.players) {
+        if (!owner || target.i === owner.i || target.eliminated || target.respawn > 0) continue;
+        const dx = entity.x - target.x, dy = entity.y - target.y, distance = Math.hypot(dx, dy);
+        if (distance > 1 && distance < entity.radius * 1.12) {
+          const strength = 1 - distance / (entity.radius * 1.12);
+          target.vx += dx / distance * (5 + strength * 14) * (entity.pullStrength || 1);
+          target.vy += dy / distance * (1.2 + strength * 4);
+        }
+      }
+    }
+    if (entity.arm > 0) continue;
     if (entity.kind === 'gravity') for (const target of world.players) {
       if (!owner || target.i === owner.i || target.eliminated || target.respawn > 0) continue;
       const dx = entity.x - target.x, dy = entity.y - target.y, distance = Math.hypot(dx, dy);
@@ -1875,12 +1984,46 @@ function trainingCommand(world, command) {
   if (command.type === 'pause') world.training.paused = !!command.value;
   else if (command.type === 'hitboxes') world.training.showHitboxes = !!command.value;
   else if (command.type === 'cpu') world.training.cpu = ['dummy', 'easy', 'normal', 'hard'].includes(command.value) ? command.value : 'dummy';
+  else if (command.type === 'bot-character') {
+    const fighter = FIGHTERS.find(item => item.id === command.value);
+    const bot = world.players.find(player => String(player.clientId || '').startsWith('cpu:'));
+    if (!fighter || !bot) return false;
+    const feetY = bot.y + bot.height / 2;
+    releaseGrab(world, bot);
+    bot.characterId = fighter.id;
+    bot.width = fighter.width;
+    bot.height = fighter.height;
+    bot.y = feetY - bot.height / 2;
+    bot.action = null;
+    bot.actionName = bot.grounded ? 'idle' : bot.vy < 0 ? 'jump' : 'fall';
+    bot.actionBuffer = null;
+    bot.charge = null;
+    bot.hitstop = 0;
+    bot.stun = 0;
+    bot.shielding = false;
+    bot.parryFrames = 0;
+    bot.shieldStun = 0;
+    bot.shieldDropLag = 0;
+    bot.dodgeFrames = 0;
+    bot.dodgeTotalFrames = 0;
+    bot.dodgeElapsed = 0;
+    bot.landingLag = 0;
+    bot.pendingLandingLag = 0;
+    bot.tumbling = false;
+    bot.tumbleRecoverFrames = 0;
+    bot.techWindow = 0;
+    bot.knockdownFrames = 0;
+    bot.criticalFlightFrames = 0;
+    bot.invincible = Math.max(bot.invincible, 30);
+    world.entities = world.entities.filter(entity => entity.owner !== bot.i);
+    emit(world, 'bot-character', { player: bot.i, characterId: fighter.id });
+  }
   else if (command.type === 'reset') {
     world.entities = [];
     world.items = [];
     for (const player of world.players) {
       resetPlayerState(world, player, { x: 640 + (player.i - 0.5) * 160, y: 300, damage: player.i ? clamp(Number(command.damage) || 0, 0, 999) : 0 });
-      player.respawn = 0; player.shield = 100; player.heldItem = null;
+      player.respawn = 0; player.shield = 100; player.heldItem = null; player.ultimateMeter = ULTIMATE_READY;
     }
   } else {
     return false;

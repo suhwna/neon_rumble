@@ -77,6 +77,92 @@ test('each fighter special kit exposes four distinct behaviors and animations', 
   }
 });
 
+test('damage builds an ultimate meter and Z plus X spends a full meter', () => {
+  const world = worldWith(), attacker = world.players[0], target = world.players[1];
+  attacker.ultimateMeter = 0; target.ultimateMeter = 0;
+  stepWorld(world, { 0: tap(1, BUTTONS.ATTACK), 1: frame(1) });
+  for (let seq = 2; seq <= 8; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.ok(attacker.ultimateMeter > 0, 'dealing damage should build meter');
+  assert.ok(target.ultimateMeter > 0, 'taking damage should build comeback meter');
+
+  attacker.action = null; attacker.actionName = 'idle'; attacker.ultimateMeter = 100;
+  stepWorld(world, { 0: frame(9, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(9) });
+  assert.equal(attacker.action?.name, 'ultimate');
+  assert.equal(attacker.ultimateMeter, 0);
+  assert.equal(world.entities[0]?.kind, 'ultimateVolt');
+});
+
+test('all four ultimates telegraph real avoidable geometry instead of auto-hitting', () => {
+  for (const fighter of FIGHTERS) {
+    const world = worldWith(), attacker = world.players[0], target = world.players[1];
+    attacker.characterId = fighter.id; attacker.width = fighter.width; attacker.height = fighter.height;
+    attacker.ultimateMeter = 100; target.damage = 0;
+    target.x = 980; target.y = -100; target.grounded = false; target.platformId = null;
+    stepWorld(world, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+    assert.equal(attacker.action?.name, 'ultimate', fighter.id);
+    assert.equal(attacker.action?.move?.ultimateKind, fighter.id, fighter.id);
+    for (let seq = 2; seq <= 72; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+    assert.equal(target.damage, 0, `${fighter.id} ultimate should miss an opponent outside its visible path`);
+  }
+});
+
+test('training starts with a ready ultimate and reset restores it for repeat testing', () => {
+  const world = createWorld({ rules: { mode: 'training' }, roster: [{ slot: 0, clientId: 'p1', characterId: 'nova' }] });
+  assert.equal(world.players[0].ultimateMeter, 100);
+  world.players[0].ultimateMeter = 0;
+  assert.equal(trainingCommand(world, { type: 'reset' }), true);
+  assert.equal(world.players[0].ultimateMeter, 100);
+});
+
+test('training can change only the bot fighter without moving either fighter', () => {
+  const world = createWorld({ rules: { mode: 'training' }, roster: [
+    { slot: 0, clientId: 'human', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:training', characterId: 'blaze' }
+  ] });
+  const human = world.players[0], bot = world.players[1];
+  human.x = 410; human.y = 260; human.damage = 47;
+  bot.x = 835; bot.y = 318; bot.vx = -120; bot.vy = 75; bot.action = { name: 'specialSide' }; bot.actionName = 'specialSide';
+  const humanBefore = { x: human.x, y: human.y, characterId: human.characterId, damage: human.damage };
+  const botBefore = { x: bot.x, feetY: bot.y + bot.height / 2, vx: bot.vx, vy: bot.vy };
+  world.entities.push({ id: 77, owner: bot.i, type: 'projectile' });
+
+  assert.equal(trainingCommand(world, { type: 'bot-character', value: 'nova' }), true);
+  const nova = FIGHTERS.find(fighter => fighter.id === 'nova');
+  assert.deepEqual(
+    { x: human.x, y: human.y, characterId: human.characterId, damage: human.damage },
+    humanBefore
+  );
+  assert.equal(bot.characterId, 'nova');
+  assert.equal(bot.width, nova.width);
+  assert.equal(bot.height, nova.height);
+  assert.equal(bot.x, botBefore.x);
+  assert.equal(bot.y + bot.height / 2, botBefore.feetY);
+  assert.equal(bot.vx, botBefore.vx);
+  assert.equal(bot.vy, botBefore.vy);
+  assert.equal(bot.action, null);
+  assert.ok(!world.entities.some(entity => entity.owner === bot.i));
+  assert.equal(trainingCommand(world, { type: 'bot-character', value: 'unknown' }), false);
+  assert.equal(bot.characterId, 'nova');
+});
+
+test('ultimate hitboxes respect shields and startup can be interrupted', () => {
+  const guarded = worldWith(), caster = guarded.players[0], defender = guarded.players[1];
+  caster.ultimateMeter = 100; defender.x = caster.x + 250;
+  stepWorld(guarded, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1, BUTTONS.SHIELD) });
+  for (let seq = 2; seq <= 34; seq++) stepWorld(guarded, { 0: frame(seq), 1: frame(seq, BUTTONS.SHIELD) });
+  assert.equal(defender.damage, 0);
+  assert.ok(defender.shield < 100, 'a guarded ultimate should damage the shield');
+  assert.ok(guarded.events.some(event => event.type === 'shield-hit' && event.ultimate), 'clients should receive an ultimate-specific impact event');
+
+  const interrupted = worldWith(), target = interrupted.players[0], punisher = interrupted.players[1];
+  target.ultimateMeter = 100;
+  stepWorld(interrupted, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1, BUTTONS.ATTACK) });
+  for (let seq = 2; seq <= 10; seq++) stepWorld(interrupted, { 0: frame(seq), 1: frame(seq) });
+  assert.notEqual(target.action?.name, 'ultimate');
+  assert.ok(!interrupted.entities.some(entity => entity.owner === target.i && entity.type === 'ultimate' && entity.life > 0));
+  assert.ok(target.ultimateMeter < 5, 'an interrupted ultimate spends its meter before normal comeback gain resumes');
+});
+
 test('projectile specials define cadence limits and reject cooldown or field-limit spam', () => {
   for (const fighter of FIGHTERS) {
     const projectile = fighter.moves.specialNeutral;
@@ -1444,10 +1530,10 @@ test('directional air dodge normalizes diagonal input, loses speed, and has land
   player.grounded = false; player.platformId = null; player.y = 300; player.vx = 0; player.vy = 0;
   stepWorld(world, { 0: frame(1, BUTTONS.RIGHT | BUTTONS.DOWN | BUTTONS.SHIELD, 1, 1), 1: frame(1) });
   assert.equal(player.actionName, 'airDodge');
-  assert.equal(player.dodgeTotalFrames, 50);
-  assert.equal(player.dodgeWindupFrames, 4);
+  assert.equal(player.dodgeTotalFrames, 44);
+  assert.equal(player.dodgeWindupFrames, 2);
   const burstSpeed = Math.hypot(player.dodgeStartVx, player.dodgeStartVy);
-  assert.ok(burstSpeed < 390, `expected normalized burst below 390, got ${burstSpeed}`);
+  assert.ok(burstSpeed > 395 && burstSpeed < 430, `expected normalized burst between 395 and 430, got ${burstSpeed}`);
   for (let seq = 2; seq <= 12; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
   assert.ok(Math.hypot(player.vx, player.vy) < burstSpeed);
 
@@ -1535,6 +1621,10 @@ test('sudden death ends on the first KO and training reset clears transient stat
 });
 
 test('training mode keeps an infinite clock while normal matches count down', () => {
+  const freshTraining = createWorld({ rules: { mode: 'training', timeSeconds: 420 }, roster: [{ slot: 0, clientId: 'solo', characterId: 'volt' }] });
+  assert.equal(freshTraining.phase, 'active');
+  assert.equal(freshTraining.countdown, 0);
+
   const training = worldWith({ mode: 'training', timeSeconds: 420 });
   const trainingTicks = training.remainingTicks;
   stepWorld(training, { 0: frame(1), 1: frame(1) });

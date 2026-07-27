@@ -237,7 +237,27 @@ test('leaving training removes the room slot and prevents automatic resume', asy
   const startedEvent = once(trainee.socket, 'match:start');
   assert.equal((await ack(trainee.socket, 'room:start')).ok, true);
   const started = await startedEvent;
+  assert.equal(started.snapshot.phase, 'active');
+  assert.equal(started.snapshot.countdown, 0);
   const before = started.snapshot.players.find(player => player.i === created.index);
+  const botBefore = started.snapshot.players.find(player => String(player.clientId || '').startsWith('cpu:'));
+  assert.equal((await ack(trainee.socket, 'training:command', {
+    type: 'bot-character', value: 'bolt'
+  })).ok, true);
+  let botChanged;
+  for (let tries = 0; tries < 8; tries++) {
+    botChanged = await once(trainee.socket, 'state:snapshot');
+    if (botChanged.players.find(player => String(player.clientId || '').startsWith('cpu:'))?.characterId === 'bolt') break;
+  }
+  const botAfter = botChanged.players.find(player => String(player.clientId || '').startsWith('cpu:'));
+  const humanAfterBotChange = botChanged.players.find(player => player.i === created.index);
+  assert.equal(botAfter.characterId, 'bolt');
+  assert.equal(humanAfterBotChange.characterId, before.characterId);
+  assert.ok(Math.abs(botAfter.x - botBefore.x) < 10, 'changing the bot fighter must preserve its position');
+  assert.ok(Math.abs((botAfter.y + botAfter.height / 2) - (botBefore.y + botBefore.height / 2)) < 20, 'changing bot height must preserve feet position apart from normal live physics');
+  assert.equal((await ack(trainee.socket, 'training:command', {
+    type: 'bot-character', value: 'unknown'
+  })).ok, false);
   assert.equal((await ack(trainee.socket, 'player:select', {
     characterId: 'blaze', palette: 2, team: 0
   })).ok, true);
@@ -250,7 +270,7 @@ test('leaving training removes the room slot and prevents automatic resume', asy
   assert.equal(after.characterId, 'blaze');
   assert.equal(after.palette, 2);
   assert.ok(Math.abs(after.x - before.x) < 10, 'changing a training fighter must preserve position');
-  assert.ok(Math.abs((after.y + after.height / 2) - (before.y + before.height / 2)) < 1, 'changing fighter height must preserve feet position');
+  assert.ok(Math.abs((after.y + after.height / 2) - (before.y + before.height / 2)) < 20, 'changing fighter height must preserve feet position apart from normal live physics');
   assert.equal((await ack(trainee.socket, 'room:leave')).ok, true);
   const resumed = await ack(trainee.socket, 'room:resume', { code: created.code, resumeToken: created.resumeToken });
   assert.equal(resumed.ok, false);
