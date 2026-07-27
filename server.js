@@ -8,6 +8,7 @@ const { FIGHTERS, STAGES, DEFAULT_RULES } = require('./content');
 const { TICK_RATE, normalizeRules, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer } = require('./engine');
 const { StatsStore } = require('./store');
 const GAME_VERSION = require('./version');
+const RELEASES = require('./releases');
 
 const app = express();
 const server = http.createServer(app);
@@ -45,6 +46,10 @@ app.get('/healthz', (_req, res) => {
 app.get('/version.json', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json(GAME_VERSION);
+});
+app.get('/releases.json', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ current: GAME_VERSION.version, releases: RELEASES });
 });
 app.use(express.static(__dirname));
 

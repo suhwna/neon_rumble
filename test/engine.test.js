@@ -64,7 +64,7 @@ test('fighter normals have distinct frame signatures, motion identities, and arc
   assert.ok(byId.blaze.weight < byId.volt.weight * 1.3, 'weight gap should not dominate launch outcomes');
   assert.ok(byId.volt.moves.specialNeutral.projectileCooldown >= 40);
   assert.ok(byId.nova.air <= 1.16);
-  assert.ok(byId.bolt.moves.specialSide.recovery <= 15);
+  assert.ok(byId.bolt.moves.specialSide.recovery >= 18);
 });
 
 test('each fighter special kit exposes four distinct behaviors and animations', () => {
@@ -93,17 +93,21 @@ test('damage builds an ultimate meter and Z plus X spends a full meter', () => {
 });
 
 test('all four ultimates telegraph real avoidable geometry instead of auto-hitting', () => {
+  const startupFrames = [];
   for (const fighter of FIGHTERS) {
     const world = worldWith(), attacker = world.players[0], target = world.players[1];
     attacker.characterId = fighter.id; attacker.width = fighter.width; attacker.height = fighter.height;
     attacker.ultimateMeter = 100; target.damage = 0;
-    target.x = 980; target.y = -100; target.grounded = false; target.platformId = null;
+    attacker.face = 1;
+    target.x = 100; target.y = 200; target.grounded = false; target.platformId = null;
     stepWorld(world, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
     assert.equal(attacker.action?.name, 'ultimate', fighter.id);
     assert.equal(attacker.action?.move?.ultimateKind, fighter.id, fighter.id);
+    startupFrames.push(attacker.action.startup);
     for (let seq = 2; seq <= 72; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
     assert.equal(target.damage, 0, `${fighter.id} ultimate should miss an opponent outside its visible path`);
   }
+  assert.ok(Math.max(...startupFrames) - Math.min(...startupFrames) <= 3, 'ultimate startup spread should remain competitively readable');
 });
 
 test('training starts with a ready ultimate and reset restores it for repeat testing', () => {
@@ -145,7 +149,7 @@ test('training can change only the bot fighter without moving either fighter', (
   assert.equal(bot.characterId, 'nova');
 });
 
-test('ultimate hitboxes respect shields and startup can be interrupted', () => {
+test('ultimate hitboxes respect shields and startup resists ordinary interruption', () => {
   const guarded = worldWith(), caster = guarded.players[0], defender = guarded.players[1];
   caster.ultimateMeter = 100; defender.x = caster.x + 250;
   stepWorld(guarded, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1, BUTTONS.SHIELD) });
@@ -158,9 +162,22 @@ test('ultimate hitboxes respect shields and startup can be interrupted', () => {
   target.ultimateMeter = 100;
   stepWorld(interrupted, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1, BUTTONS.ATTACK) });
   for (let seq = 2; seq <= 10; seq++) stepWorld(interrupted, { 0: frame(seq), 1: frame(seq) });
-  assert.notEqual(target.action?.name, 'ultimate');
-  assert.ok(!interrupted.entities.some(entity => entity.owner === target.i && entity.type === 'ultimate' && entity.life > 0));
-  assert.ok(target.ultimateMeter < 5, 'an interrupted ultimate spends its meter before normal comeback gain resumes');
+  assert.equal(target.action?.name, 'ultimate');
+  assert.ok(interrupted.entities.some(entity => entity.owner === target.i && entity.type === 'ultimate' && entity.life > 0));
+  assert.ok(target.damage > 0, 'ultimate armor should preserve the move without negating incoming damage');
+  assert.equal(target.stun, 0);
+  assert.equal(target.grounded, true, 'armored impact must not detach the caster from the floor');
+  assert.ok(target.ultimateMeter < 5, 'a committed ultimate spends its meter before normal comeback gain resumes');
+});
+
+test('ultimate activation is grounded-only and an airborne attempt preserves the meter', () => {
+  const world = worldWith(), player = world.players[0];
+  player.ultimateMeter = 100;
+  player.grounded = false; player.platformId = null; player.coyoteFrames = 0; player.y = 300;
+  stepWorld(world, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+  assert.notEqual(player.action?.name, 'ultimate');
+  assert.equal(player.ultimateMeter, 100);
+  assert.ok(!world.entities.some(entity => entity.owner === player.i && entity.type === 'ultimate'));
 });
 
 test('projectile specials define cadence limits and reject cooldown or field-limit spam', () => {
@@ -315,6 +332,21 @@ test('move frame data applies damage and hitstop only after startup', () => {
   assert.ok(world.players[1].hitstop > 0);
 });
 
+test('same-frame direct attacks trade without player-slot priority', () => {
+  const world = worldWith(), left = world.players[0], right = world.players[1];
+  const move = { ...FIGHTERS.find(fighter => fighter.id === 'volt').moves.groundNeutral };
+  left.x = 620; right.x = 666; left.face = 1; right.face = -1;
+  left.action = { name: 'groundNeutral', move, frame: move.startup - 1, startup: move.startup, hit: [], activated: false };
+  right.action = { name: 'groundNeutral', move: { ...move }, frame: move.startup - 1, startup: move.startup, hit: [], activated: false };
+  left.actionName = right.actionName = 'groundNeutral';
+
+  stepWorld(world, { 0: frame(1), 1: frame(1) });
+
+  assert.ok(left.damage > 0, 'later slot must still hit the earlier slot');
+  assert.ok(right.damage > 0, 'earlier slot must still hit the later slot');
+  assert.equal(left.damage, right.damage);
+});
+
 test('releasing a held shield opens an order-independent five-frame parry with punish advantage', () => {
   const world = worldWith();
   const attacker = world.players[0], defender = world.players[1];
@@ -325,7 +357,7 @@ test('releasing a held shield opens an order-independent five-frame parry with p
   attacker.actionName = 'groundNeutral';
   stepWorld(world, { 0: frame(4), 1: frame(4) });
   assert.equal(defender.damage, 0);
-  assert.equal(defender.shield, shieldBeforeParry);
+  assert.ok(defender.shield >= shieldBeforeParry && defender.shield <= shieldBeforeParry + .1);
   assert.ok(attacker.hitstop >= 16);
   assert.ok(defender.hitstop >= 2);
   assert.equal(defender.shieldDropLag, 0);
@@ -363,6 +395,23 @@ test('a fresh shield press blocks but does not parry, while shield shifting move
   assert.ok(shieldHurtbox.x > defender.x);
 });
 
+test('a depleted shifted shield can be poked through an exposed body hurtbox', () => {
+  const world = worldWith(), attacker = world.players[0], defender = world.players[1];
+  defender.shielding = true; defender.actionName = 'shield'; defender.shield = 0.061;
+  defender.shieldOffsetY = -9;
+  const exposedLegY = defender.y + defender.height * .28 + Math.max(10, defender.width * .23) - 0.05;
+  world.entities.push({
+    id: world.nextEntityId++, type: 'projectile', kind: 'shieldPokeTest', owner: attacker.i,
+    x: defender.x, y: exposedLegY, vx: 0, vy: 0, radius: 0.1,
+    damage: 4, kx: 150, ky: 80, hitstop: 4, life: 5, arm: 0, hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(1), 1: frame(1, BUTTONS.SHIELD) });
+  assert.ok(defender.damage > 0);
+  assert.equal(defender.shielding, false);
+  assert.ok(world.events.some(event => event.type === 'hit' && event.player === defender.i));
+  assert.ok(!world.events.some(event => event.type === 'shield-hit' && event.player === defender.i));
+});
+
 test('shield cancel up attacks, dash grabs, and angled side attacks use distinct frame data', () => {
   const upSmashWorld = worldWith(), upSmash = upSmashWorld.players[0];
   for (let seq = 1; seq <= 3; seq++) stepWorld(upSmashWorld, { 0: frame(seq, BUTTONS.SHIELD), 1: frame(seq) });
@@ -372,7 +421,7 @@ test('shield cancel up attacks, dash grabs, and angled side attacks use distinct
   assert.equal(upSmash.shielding, false);
 
   const dashWorld = worldWith(), dasher = dashWorld.players[0];
-  dasher.dashFrames = 5; dasher.vx = 420;
+  dasher.movementState = 'dash'; dasher.dashFrames = 5; dasher.dashDirection = 1; dasher.vx = 420;
   stepWorld(dashWorld, { 0: frame(1, BUTTONS.GRAB, 1), 1: frame(1) });
   assert.equal(dasher.action?.name, 'grab');
   assert.equal(dasher.action?.variant, 'dash');
@@ -386,6 +435,12 @@ test('shield cancel up attacks, dash grabs, and angled side attacks use distinct
   assert.equal(angler.action?.variant, 'tilt');
   assert.equal(angler.action?.move.angleShift, -1);
   assert.ok(angler.action?.move.hitboxShiftY < 0);
+
+  const shieldGrabWorld = worldWith(), shieldGrabber = shieldGrabWorld.players[0];
+  for (let seq = 1; seq <= 3; seq++) stepWorld(shieldGrabWorld, { 0: frame(seq, BUTTONS.SHIELD), 1: frame(seq) });
+  stepWorld(shieldGrabWorld, { 0: frame(4, BUTTONS.SHIELD | BUTTONS.GRAB), 1: frame(4) });
+  assert.equal(shieldGrabber.action?.name, 'grab');
+  assert.equal(shieldGrabber.action?.variant, 'shield');
 });
 
 test('shield-break stun can be mashed down without changing ordinary hitstun', () => {
@@ -480,26 +535,60 @@ test('charged side attack scales above its base damage', () => {
 });
 
 test('short attack taps create tilts, holding Z creates a smash, and X remains a special', () => {
+  const jab = worldWith();
+  stepWorld(jab, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.equal(jab.players[0].action, null, 'grounded Z waits briefly to distinguish a jab from a smash hold');
+  stepWorld(jab, { 0: frame(2), 1: frame(2) });
+  assert.equal(jab.players[0].action?.name, 'groundNeutral');
+  assert.equal(jab.players[0].action?.variant, 'normal');
+
   const tilt = worldWith();
   stepWorld(tilt, { 0: frame(1, BUTTONS.DOWN, 0, 1), 1: frame(1) });
-  stepWorld(tilt, { 0: frame(2, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(2) });
-  assert.equal(tilt.players[0].action, null);
-  stepWorld(tilt, { 0: frame(3, BUTTONS.DOWN, 0, 1), 1: frame(3) });
+  for (let seq = 2; seq <= 8; seq++) {
+    stepWorld(tilt, { 0: frame(seq, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(seq) });
+    assert.equal(tilt.players[0].action, null, 'a seven-frame down Z hold must remain eligible for tilt');
+  }
+  stepWorld(tilt, { 0: frame(9, BUTTONS.DOWN, 0, 1), 1: frame(9) });
   assert.equal(tilt.players[0].action?.name, 'groundDown');
   assert.equal(tilt.players[0].action?.variant, 'tilt');
+  assert.equal(tilt.players[0].action?.move.staleKey, 'groundDown:tilt');
   assert.equal(tilt.players[0].action?.move.chargeable, false);
+
+  const sideTilt = worldWith();
+  for (let seq = 1; seq <= 13; seq++) {
+    stepWorld(sideTilt, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
+    assert.equal(sideTilt.players[0].action, null, 'a thirteen-frame Z hold must not charge accidentally');
+  }
+  stepWorld(sideTilt, { 0: frame(14, BUTTONS.RIGHT, 1), 1: frame(14) });
+  assert.equal(sideTilt.players[0].action?.name, 'groundSide');
+  assert.equal(sideTilt.players[0].action?.variant, 'tilt');
 
   const smash = worldWith();
   stepWorld(smash, { 0: frame(1, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(1) });
-  for (let seq = 2; seq <= 10; seq++) stepWorld(smash, { 0: frame(seq, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(seq) });
+  for (let seq = 2; seq <= 13; seq++) stepWorld(smash, { 0: frame(seq, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(seq) });
   assert.equal(smash.players[0].action, null);
-  stepWorld(smash, { 0: frame(11, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(11) });
+  stepWorld(smash, { 0: frame(14, BUTTONS.DOWN | BUTTONS.ATTACK, 0, 1), 1: frame(14) });
   assert.equal(smash.players[0].action?.name, 'groundDown');
   assert.equal(smash.players[0].action?.variant, 'smash');
+  assert.equal(smash.players[0].action?.move.staleKey, 'groundDown:smash');
   assert.equal(smash.players[0].action?.move.chargeable, true);
   assert.equal(smash.players[0].action?.charging, true);
   assert.ok(smash.players[0].action.move.damage > tilt.players[0].action.move.damage);
   assert.equal(publicSnapshot(smash).players[0].actionVariant, 'smash');
+
+  const neutralSmash = worldWith();
+  for (let seq = 1; seq <= 14; seq++) {
+    stepWorld(neutralSmash, { 0: frame(seq, BUTTONS.ATTACK), 1: frame(seq) });
+  }
+  assert.equal(neutralSmash.players[0].action?.name, 'groundSide');
+  assert.equal(neutralSmash.players[0].action?.variant, 'smash');
+  assert.equal(neutralSmash.players[0].action?.charging, true);
+
+  const dashAttack = worldWith(), dasher = dashAttack.players[0];
+  dasher.movementState = 'dash'; dasher.dashFrames = 6; dasher.dashDirection = 1; dasher.vx = 430;
+  stepWorld(dashAttack, { 0: frame(1, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(1) });
+  assert.equal(dasher.action?.name, 'dashAttack');
+  assert.equal(dasher.action?.frame, 0, 'dash Z must be created on the press frame without a hold gate');
 
   const specialButton = worldWith();
   stepWorld(specialButton, { 0: frame(1, BUTTONS.SPECIAL), 1: frame(1) });
@@ -969,7 +1058,10 @@ test('shield uses 50 durability while preserving proportional shrink and regener
   stepWorld(world, { 0: frame(2, BUTTONS.SHIELD), 1: frame(2) });
   assert.equal(player.shielding, false);
   assert.ok(player.dizzyFrames > 0);
-  assert.ok(world.events.some(event => event.type === 'shield-break'));
+  const shieldBreak = world.events.find(event => event.type === 'shield-break');
+  assert.ok(shieldBreak);
+  assert.ok(Number.isFinite(shieldBreak.x) && Number.isFinite(shieldBreak.y));
+  assert.ok(shieldBreak.radius >= player.height * .75);
 });
 
 test('shield and dodge inputs buffered during end lag execute on the first free frame', () => {
@@ -1099,8 +1191,11 @@ test('balance pass keeps armored power and mobility rewards in separate fighter 
   assert.ok(byId.volt.moves.specialSide.recovery >= 17);
   assert.ok(byId.volt.moves.groundSide.damage >= 10);
   assert.ok(byId.volt.moves.specialNeutral.chainRadius <= 80);
-  assert.ok(byId.bolt.moves.specialSide.kx >= 445);
-  assert.ok(byId.bolt.moves.specialSide.knockbackGrowth >= 1.12);
+  assert.ok(byId.bolt.moves.specialSide.kx <= 390);
+  assert.ok(byId.bolt.moves.specialSide.knockbackGrowth <= 1.03);
+  assert.ok(byId.bolt.moves.specialDown.damage <= 12);
+  assert.ok(byId.bolt.moves.specialDown.reachX <= 105);
+  assert.ok(byId.bolt.moves.specialNeutral.returnDamageScale <= .65);
   assert.ok(byId.bolt.moves.specialUp.riseHorizontal >= 200);
   assert.ok(byId.bolt.speed >= 1.06);
   assert.ok(byId.bolt.air >= 1.04);
@@ -1112,8 +1207,9 @@ test('balance pass keeps armored power and mobility rewards in separate fighter 
   assert.ok(byId.bolt.moves.airBack.knockbackGrowth >= 1.08);
   assert.equal(byId.nova.moves.specialNeutral.maxActiveProjectiles, 1);
   assert.ok(byId.nova.moves.airBack.knockbackGrowth >= 1.08);
-  assert.ok(byId.nova.moves.specialSide.recovery <= 13);
-  assert.ok(byId.nova.moves.specialSide.knockbackGrowth >= 1.15);
+  assert.ok(byId.nova.moves.specialSide.recovery >= 18);
+  assert.ok(byId.nova.moves.specialSide.knockbackGrowth <= 1.06);
+  assert.ok(byId.nova.moves.specialSide.teleport <= 110);
   assert.equal(byId.nova.moves.specialDown.damage, 5);
   assert.ok(byId.nova.moves.specialDown.trapLife <= 180);
   assert.ok(byId.nova.moves.specialDown.reachX <= 105);
@@ -1280,11 +1376,12 @@ test('a third fighter hitting a grabbed target safely releases both grab states'
 
 test('stale-move negation weakens repeated use of the same attack', () => {
   const world = worldWith();
+  const platform = world.platforms[0];
   let sequence = 0;
   function landAttack() {
     const attacker = world.players[0], target = world.players[1];
-    attacker.x = 600; attacker.y = 475; attacker.vx = 0; attacker.vy = 0; attacker.grounded = true; attacker.action = null; attacker.hitstop = 0; attacker.lastInput = frame(sequence);
-    target.x = 660; target.y = 471; target.vx = 0; target.vy = 0; target.grounded = true; target.hitstop = 0; target.stun = 0; target.invincible = 0;
+    attacker.x = 600; attacker.y = platform.y - attacker.height / 2; attacker.vx = 0; attacker.vy = 0; attacker.grounded = true; attacker.platformId = platform.id; attacker.action = null; attacker.hitstop = 0; attacker.lastInput = frame(sequence);
+    target.x = 660; target.y = platform.y - target.height / 2; target.vx = 0; target.vy = 0; target.grounded = true; target.platformId = platform.id; target.hitstop = 0; target.stun = 0; target.invincible = 0;
     stepWorld(world, { 0: frame(++sequence, BUTTONS.ATTACK), 1: frame(sequence) });
     for (let count = 0; count < 6; count++) stepWorld(world, { 0: frame(++sequence), 1: frame(sequence) });
   }
@@ -1450,7 +1547,7 @@ test('actionable tumble remains until an aerial action and blocks fast fall', ()
 
 test('standard up specials enter freefall while Bolt spring remains actionable', () => {
   const standard = worldWith(), volt = standard.players[0];
-  volt.grounded = false; volt.platformId = null; volt.coyoteFrames = 0; volt.x = 420; volt.y = 500;
+  volt.grounded = false; volt.platformId = null; volt.coyoteFrames = 0; volt.x = 120; volt.y = 500;
   stepWorld(standard, { 0: frame(1, BUTTONS.UP | BUTTONS.SPECIAL, 0, -1), 1: frame(1) });
   for (let seq = 2; seq <= 42; seq++) stepWorld(standard, { 0: frame(seq), 1: frame(seq) });
   assert.equal(volt.action, null); assert.equal(volt.freefall, true); assert.equal(volt.actionName, 'freefall');
@@ -1466,7 +1563,7 @@ test('standard up specials enter freefall while Bolt spring remains actionable',
   ] });
   spring.phase = 'active';
   const bolt = spring.players[0];
-  bolt.grounded = false; bolt.platformId = null; bolt.coyoteFrames = 0; bolt.invincible = 0; bolt.x = 420; bolt.y = 500;
+  bolt.grounded = false; bolt.platformId = null; bolt.coyoteFrames = 0; bolt.invincible = 0; bolt.x = 120; bolt.y = 500;
   stepWorld(spring, { 0: frame(1, BUTTONS.UP | BUTTONS.SPECIAL, 0, -1), 1: frame(1) });
   for (let seq = 2; seq <= 38; seq++) stepWorld(spring, { 0: frame(seq), 1: frame(seq) });
   assert.equal(bolt.freefall, false);
@@ -1560,7 +1657,7 @@ test('ledge catch has two vulnerable frames and exposes all five recovery option
   catcher.x = platform.x + 3; catcher.y = platform.y + 5; catcher.vx = 0; catcher.vy = 100;
   stepWorld(caught, { 0: frame(1), 1: frame(1) });
   assert.ok(catcher.ledge);
-  assert.equal(catcher.ledgeCatchFrames, 1);
+  assert.equal(catcher.ledgeCatchFrames, 2);
   assert.equal(catcher.invincible, 0);
   stepWorld(caught, { 0: frame(2), 1: frame(2) });
   assert.equal(catcher.invincible, 0);
@@ -1580,20 +1677,159 @@ test('ledge catch has two vulnerable frames and exposes all five recovery option
 
   const attack = withLedge();
   stepWorld(attack.world, { 0: frame(1, BUTTONS.SPECIAL), 1: frame(1) });
+  assert.equal(attack.player.actionName, 'ledgeAttackClimb');
+  assert.equal(attack.player.grounded, false);
+  for (let seq = 2; seq <= 9; seq++) stepWorld(attack.world, { 0: frame(seq), 1: frame(seq) });
   assert.equal(attack.player.action?.name, 'groundNeutral');
 
   const roll = withLedge();
   stepWorld(roll.world, { 0: frame(1, BUTTONS.GRAB), 1: frame(1) });
+  assert.equal(roll.player.actionName, 'ledgeRollClimb');
+  for (let seq = 2; seq <= 10; seq++) stepWorld(roll.world, { 0: frame(seq), 1: frame(seq) });
   assert.equal(roll.player.actionName, 'ledgeRoll');
 
   const jump = withLedge();
   stepWorld(jump.world, { 0: frame(1, BUTTONS.UP, 0, -1), 1: frame(1) });
+  assert.equal(jump.player.actionName, 'ledgeJumpClimb');
+  for (let seq = 2; seq <= 7; seq++) stepWorld(jump.world, { 0: frame(seq), 1: frame(seq) });
   assert.equal(jump.player.actionName, 'ledgeJump');
 
   const drop = withLedge();
   stepWorld(drop.world, { 0: frame(1, BUTTONS.DOWN, 0, 1), 1: frame(1) });
   assert.equal(drop.player.ledge, null);
   assert.equal(drop.player.fastFalling, true);
+});
+
+test('rising recovery can catch a ledge and air jump refresh waits until vulnerable catch frames end', () => {
+  const world = worldWith(), player = world.players[0], platform = world.platforms[0];
+  player.grounded = false; player.platformId = null; player.coyoteFrames = 0;
+  player.x = platform.x + 3; player.y = platform.y + 28; player.vx = 0; player.vy = -300;
+  player.jumps = 0; player.recoveryAvailable = false;
+  stepWorld(world, { 0: frame(1), 1: frame(1) });
+  assert.ok(player.ledge, 'an upward-moving recovery should snap to a ledge from below');
+  assert.equal(player.jumps, 0);
+  assert.equal(player.recoveryAvailable, true, 'up special refreshes immediately on ledge catch');
+  stepWorld(world, { 0: frame(2), 1: frame(2) });
+  assert.equal(player.jumps, 0, 'air jump must remain spent during the second vulnerable frame');
+  stepWorld(world, { 0: frame(3), 1: frame(3) });
+  assert.equal(player.jumps, 1, 'air jump refreshes once ledge invincibility begins');
+});
+
+test('hitstun lockout and aerial attack end lag cannot be cancelled by a ledge grab', () => {
+  const hitWorld = worldWith(), target = hitWorld.players[0], attacker = hitWorld.players[1], platform = hitWorld.platforms[0];
+  target.grounded = false; target.platformId = null; target.coyoteFrames = 0; target.invincible = 0;
+  attacker.x = 900;
+  hitWorld.entities.push({
+    id: hitWorld.nextEntityId++, type: 'projectile', kind: 'ledge-lock-test', owner: attacker.i,
+    x: target.x, y: target.y, vx: 0, vy: 0, radius: 30,
+    damage: 5, kx: 160, ky: 100, hitstop: 4, life: 5, arm: 0, hitPlayers: []
+  });
+  stepWorld(hitWorld, { 0: frame(1), 1: frame(1) });
+  assert.equal(target.ledgeGrabLockFrames, 55);
+
+  target.x = platform.x + 3; target.y = platform.y + 8; target.vx = 0; target.vy = 80;
+  target.stun = 0; target.hitstop = 0; target.coyoteFrames = 0;
+  stepWorld(hitWorld, { 0: frame(2), 1: frame(2) });
+  assert.equal(target.ledge, null, 'recently hit fighter must not magnet-snap to the ledge');
+  target.ledgeGrabLockFrames = 1;
+  target.x = platform.x + 3; target.y = platform.y + 8; target.vx = 0; target.vy = 80;
+  stepWorld(hitWorld, { 0: frame(3), 1: frame(3) });
+  assert.ok(target.ledge, 'ledge becomes available when the 55-frame lockout expires');
+
+  const attackWorld = worldWith(), attackerAtLedge = attackWorld.players[0], attackPlatform = attackWorld.platforms[0];
+  attackerAtLedge.grounded = false; attackerAtLedge.platformId = null; attackerAtLedge.coyoteFrames = 0; attackerAtLedge.invincible = 0;
+  attackerAtLedge.x = attackPlatform.x + 3; attackerAtLedge.y = attackPlatform.y + 8; attackerAtLedge.vx = 0; attackerAtLedge.vy = 40;
+  stepWorld(attackWorld, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.ok(attackerAtLedge.action?.name?.startsWith('air'));
+  assert.equal(attackerAtLedge.ledge, null, 'aerial attack must finish instead of being cancelled into ledge catch');
+  attackerAtLedge.action = null; attackerAtLedge.actionName = 'fall';
+  attackerAtLedge.x = attackPlatform.x + 3; attackerAtLedge.y = attackPlatform.y + 8; attackerAtLedge.vx = 0; attackerAtLedge.vy = 40;
+  stepWorld(attackWorld, { 0: frame(2), 1: frame(2) });
+  assert.ok(attackerAtLedge.ledge);
+});
+
+test('a hit during vulnerable ledge catch denies air-jump refresh', () => {
+  const world = worldWith(), player = world.players[0], attacker = world.players[1], platform = world.platforms[0];
+  player.grounded = false; player.platformId = null; player.coyoteFrames = 0;
+  player.x = platform.x + 3; player.y = platform.y + 12; player.vx = 0; player.vy = 100; player.jumps = 0;
+  stepWorld(world, { 0: frame(1), 1: frame(1) });
+  assert.ok(player.ledge); assert.equal(player.jumps, 0);
+  world.entities.push({
+    id: world.nextEntityId++, type: 'projectile', kind: 'ledgeSnipe', owner: attacker.i,
+    x: player.x, y: player.y, vx: 0, vy: 0, radius: 24,
+    damage: 5, kx: 180, ky: 120, hitstop: 4, life: 5, arm: 0, hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(2), 1: frame(2) });
+  assert.equal(player.ledge, null); assert.equal(player.jumps, 0);
+  assert.equal(player.ledgeJumpRefreshPending, false);
+});
+
+test('ledge options replace hanging invincibility with their own authored windows', () => {
+  const withLedge = () => {
+    const world = worldWith(), player = world.players[0], platform = world.platforms[0];
+    player.grounded = false; player.platformId = null; player.invincible = 24; player.ledgeInvincible = 24; player.ledgeCatchFrames = 0;
+    player.ledge = { platformId: platform.id, x: platform.x, y: platform.y, face: 1 };
+    player.x = platform.x - 16; player.y = platform.y + 20; player.face = 1;
+    return { world, player };
+  };
+  const attack = withLedge();
+  stepWorld(attack.world, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
+  assert.equal(attack.player.actionName, 'ledgeAttackClimb');
+  assert.equal(attack.player.invincible, 8);
+  for (let seq = 2; seq <= 9; seq++) stepWorld(attack.world, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(attack.player.invincible, 0);
+  assert.equal(attack.player.ledgeInvincible, 0);
+
+  const roll = withLedge();
+  stepWorld(roll.world, { 0: frame(1, BUTTONS.SHIELD), 1: frame(1) });
+  assert.equal(roll.player.actionName, 'ledgeRollClimb');
+  for (let seq = 2; seq <= 10; seq++) stepWorld(roll.world, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(roll.player.actionName, 'ledgeRoll');
+  assert.ok(roll.player.invincible > 0 && roll.player.invincible <= 10);
+  assert.ok(roll.player.dodgeFrames > roll.player.invincible, 'roll recovery must outlast invincibility');
+
+  const jump = withLedge();
+  stepWorld(jump.world, { 0: frame(1, BUTTONS.UP, 0, -1), 1: frame(1) });
+  assert.equal(jump.player.actionName, 'ledgeJumpClimb');
+  assert.equal(jump.player.invincible, 6);
+  assert.equal(jump.player.canLedgeInvincible, false);
+  for (let seq = 2; seq <= 7; seq++) stepWorld(jump.world, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(jump.player.actionName, 'ledgeJump');
+  assert.ok(jump.player.ledgeGrabLockFrames > 0);
+  assert.ok(jump.player.vx > 0 && jump.player.vy < 0, 'ledge jump must launch inward and upward');
+  const jumpPlatform = jump.world.platforms[0];
+  jump.player.x = jumpPlatform.x + 3; jump.player.y = jumpPlatform.y + 12;
+  jump.player.vx = 0; jump.player.vy = 100; jump.player.coyoteFrames = 0; jump.player.invincible = 0;
+  stepWorld(jump.world, { 0: frame(8), 1: frame(8) });
+  assert.equal(jump.player.ledge, null, 'ledge jump must not immediately snap back to the same ledge');
+  jump.player.ledgeGrabLockFrames = 0;
+  jump.player.x = jumpPlatform.x + 3; jump.player.y = jumpPlatform.y + 12;
+  jump.player.vx = 0; jump.player.vy = 100;
+  stepWorld(jump.world, { 0: frame(9), 1: frame(9) });
+  assert.ok(jump.player.ledge);
+  assert.equal(jump.player.ledgeInvincible, 0, 'ledge jump regrab must not refresh invincibility');
+
+  const drop = withLedge();
+  stepWorld(drop.world, { 0: frame(1, BUTTONS.DOWN, 0, 1), 1: frame(1) });
+  assert.equal(drop.player.invincible, 0);
+});
+
+test('holding up from a ledge performs one jump instead of repeatedly regrabbing', () => {
+  const world = worldWith(), player = world.players[0], platform = world.platforms[0];
+  world.players[1].x = 1000;
+  player.grounded = false; player.platformId = null; player.invincible = 0; player.ledgeInvincible = 0; player.ledgeCatchFrames = 0;
+  player.ledge = { platformId: platform.id, x: platform.x, y: platform.y, face: 1 };
+  player.x = platform.x - 16; player.y = platform.y + 20; player.face = 1;
+  const ledgesBefore = world.events.filter(event => event.type === 'ledge').length;
+
+  for (let seq = 1; seq <= 20; seq++) {
+    stepWorld(world, { 0: frame(seq, BUTTONS.UP, 0, -1), 1: frame(seq) });
+  }
+
+  assert.equal(world.events.filter(event => event.type === 'ledge').length, ledgesBefore);
+  assert.equal(player.ledge, null);
+  assert.ok(player.x >= platform.x + 25, `ledge jump should clear the snap zone: ${player.x - platform.x}`);
+  assert.ok(player.y < platform.y - 15, `ledge jump should remain above the ledge: ${player.y - platform.y}`);
 });
 
 test('twenty-five four-player worlds stay inside the server tick budget', () => {
@@ -1625,9 +1861,9 @@ test('keyboard movement runs on one press, dashes on a double tap, pivots early,
   assert.notEqual(runner.actionName, 'dash'); assert.equal(runner.dashFrames, 0); assert.ok(runner.vx > 0 && runner.vx < 200);
   stepWorld(ground, { 0: frame(2), 1: frame(2) });
   stepWorld(ground, { 0: frame(3, BUTTONS.RIGHT, 1), 1: frame(3) });
-  assert.equal(runner.actionName, 'dash'); assert.ok(runner.dashFrames > 0); assert.ok(runner.vx > 500);
+  assert.equal(runner.actionName, 'dash'); assert.equal(runner.dashFrames, 16); assert.ok(runner.vx > 500);
   stepWorld(ground, { 0: frame(4, BUTTONS.LEFT, -1), 1: frame(4) });
-  assert.equal(runner.actionName, 'dash'); assert.ok(runner.vx < -400); assert.equal(runner.face, -1);
+  assert.equal(runner.actionName, 'pivot'); assert.ok(runner.vx < -400); assert.equal(runner.face, -1);
 
   const air = worldWith(), airborne = air.players[0];
   airborne.grounded = false; airborne.y = 300; airborne.vx = 300; airborne.coyoteFrames = 0;
@@ -1645,6 +1881,89 @@ test('keyboard movement progresses from walk to run while a double tap remains a
   assert.equal(player.actionName, 'run');
   assert.ok(player.vx > 220);
   assert.equal(player.dashFrames, 0);
+});
+
+test('dash attacks and dash grabs use movement state instead of absolute velocity for every fighter', () => {
+  for (const fighter of FIGHTERS) {
+    const makeWorld = () => {
+      const world = createWorld({ rules: { mode: 'stock', stocks: 3 }, roster: [
+        { slot: 0, clientId: `${fighter.id}:player`, characterId: fighter.id },
+        { slot: 1, clientId: `${fighter.id}:target`, characterId: 'blaze' }
+      ] });
+      world.phase = 'active'; world.countdown = 0;
+      const platform = world.platforms[0], player = world.players[0];
+      player.x = 500; player.y = platform.y - player.height / 2; player.grounded = true; player.invincible = 0;
+      world.players[1].x = 1000;
+      return world;
+    };
+
+    const fastWalk = makeWorld(), walker = fastWalk.players[0];
+    walker.movementState = 'walk'; walker.vx = fighter.dashSpeed + 80;
+    stepWorld(fastWalk, { 0: tap(1, BUTTONS.ATTACK, BUTTONS.RIGHT, 1), 1: frame(1) });
+    assert.equal(walker.action?.name, 'groundSide', `${fighter.id} velocity alone must not create dash attack`);
+
+    const runAttack = makeWorld(), runner = runAttack.players[0];
+    runner.movementState = 'run'; runner.vx = fighter.runSpeed;
+    stepWorld(runAttack, { 0: tap(1, BUTTONS.ATTACK, BUTTONS.RIGHT, 1), 1: frame(1) });
+    assert.equal(runner.action?.name, 'dashAttack', `${fighter.id} run state should create dash attack`);
+
+    const fastWalkGrab = makeWorld(), walkingGrabber = fastWalkGrab.players[0];
+    walkingGrabber.movementState = 'walk'; walkingGrabber.vx = fighter.dashSpeed + 80;
+    stepWorld(fastWalkGrab, { 0: tap(1, BUTTONS.GRAB, BUTTONS.RIGHT, 1), 1: frame(1) });
+    assert.equal(walkingGrabber.action?.variant, 'normal', `${fighter.id} velocity alone must not create dash grab`);
+
+    const runGrab = makeWorld(), runningGrabber = runGrab.players[0];
+    runningGrabber.movementState = 'run'; runningGrabber.vx = fighter.runSpeed;
+    stepWorld(runGrab, { 0: tap(1, BUTTONS.GRAB, BUTTONS.RIGHT, 1), 1: frame(1) });
+    assert.equal(runningGrabber.action?.variant, 'dash', `${fighter.id} run state should create dash grab`);
+  }
+});
+
+test('late dash reversal brakes while dash exit and dash jump preserve deliberate momentum', () => {
+  const brakeWorld = worldWith(), braking = brakeWorld.players[0];
+  brakeWorld.players[1].x = 1100;
+  stepWorld(brakeWorld, { 0: frame(1, BUTTONS.RIGHT, 1), 1: frame(1) });
+  stepWorld(brakeWorld, { 0: frame(2), 1: frame(2) });
+  stepWorld(brakeWorld, { 0: frame(3, BUTTONS.RIGHT, 1), 1: frame(3) });
+  for (let seq = 4; seq <= 11; seq++) stepWorld(brakeWorld, { 0: frame(seq, BUTTONS.RIGHT, 1), 1: frame(seq) });
+  stepWorld(brakeWorld, { 0: frame(12, BUTTONS.LEFT, -1), 1: frame(12) });
+  assert.equal(braking.movementState, 'brake');
+  assert.equal(braking.actionName, 'brake');
+  assert.equal(braking.dashFrames, 0);
+  assert.equal(braking.face, 1, 'late reversal should plant before turning around');
+
+  const exitWorld = worldWith(), exiting = exitWorld.players[0], volt = FIGHTERS.find(fighter => fighter.id === 'volt');
+  exitWorld.players[1].x = 1100;
+  stepWorld(exitWorld, { 0: frame(1, BUTTONS.RIGHT, 1), 1: frame(1) });
+  stepWorld(exitWorld, { 0: frame(2), 1: frame(2) });
+  stepWorld(exitWorld, { 0: frame(3, BUTTONS.RIGHT, 1), 1: frame(3) });
+  for (let seq = 4; seq <= 22; seq++) stepWorld(exitWorld, { 0: frame(seq, BUTTONS.RIGHT, 1), 1: frame(seq) });
+  assert.equal(exiting.movementState, 'run');
+  assert.ok(Math.abs(exiting.vx - volt.runSpeed) < 1, `dash should settle into run speed, got ${exiting.vx}`);
+
+  const jumpWorld = worldWith(), jumper = jumpWorld.players[0];
+  jumpWorld.players[1].x = 1100;
+  stepWorld(jumpWorld, { 0: frame(1, BUTTONS.RIGHT, 1), 1: frame(1) });
+  stepWorld(jumpWorld, { 0: frame(2), 1: frame(2) });
+  stepWorld(jumpWorld, { 0: frame(3, BUTTONS.RIGHT, 1), 1: frame(3) });
+  stepWorld(jumpWorld, { 0: frame(4, BUTTONS.RIGHT | BUTTONS.UP, 1, -1), 1: frame(4) });
+  assert.equal(jumper.jumpSquatDash, true);
+  for (let seq = 5; seq <= 7; seq++) stepWorld(jumpWorld, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.UP, 1, -1), 1: frame(seq) });
+  assert.equal(jumper.grounded, false);
+  assert.ok(jumper.vx >= volt.dashSpeed * .9, `dash jump should retain horizontal burst, got ${jumper.vx}`);
+});
+
+test('fighter dash startup and braking are distinct while ordinary run speed stays below 301', () => {
+  const byId = Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, fighter]));
+  for (const fighter of FIGHTERS) {
+    assert.ok(fighter.runSpeed >= 280 && fighter.runSpeed <= 300, `${fighter.id} run speed`);
+    assert.ok(fighter.dashSpeed >= 470 && fighter.dashSpeed <= 535, `${fighter.id} dash speed`);
+    assert.ok(fighter.dashSpeed - fighter.runSpeed >= 185, `${fighter.id} needs a meaningful dash burst`);
+    assert.ok(fighter.dashBrakeFrames >= 3 && fighter.dashBrakeFrames <= 5, `${fighter.id} brake duration`);
+  }
+  assert.ok(byId.volt.dashSpeed > byId.blaze.dashSpeed);
+  assert.ok(byId.volt.dashBrakeFrames < byId.blaze.dashBrakeFrames);
+  assert.ok(byId.nova.dashBrakeControl > byId.bolt.dashBrakeControl);
 });
 
 test('crouching reduces launch to 85 percent and Bolt can crawl with a lowered hurtbox', () => {
@@ -1938,18 +2257,18 @@ test('being hit cancels an unarmored attack instead of letting it continue', () 
 });
 
 test('running attacks flow into dash attacks while held side attacks still charge', () => {
-  const tap = worldWith(); tap.players[1].x = 900; tap.players[0].vx = 360;
+  const tap = worldWith(); tap.players[1].x = 900; tap.players[0].movementState = 'run'; tap.players[0].horizontalHoldFrames = 12; tap.players[0].vx = 300;
   stepWorld(tap, { 0: { ...frame(1, BUTTONS.RIGHT, 1), pressedButtons: BUTTONS.ATTACK }, 1: frame(1) });
   assert.equal(tap.players[0].actionName, 'dashAttack');
   assert.equal(tap.players[0].action.frame, 0);
   stepWorld(tap, { 0: frame(2), 1: frame(2) });
-  assert.ok(tap.players[0].vx > 300);
+  assert.ok(tap.players[0].vx >= 280);
   for (let seq = 3; seq <= 40; seq++) stepWorld(tap, { 0: frame(seq), 1: frame(seq) });
   assert.equal(tap.players[0].action, null);
   assert.equal(tap.players[0].actionName, 'idle');
 
   const held = worldWith(); held.players[1].x = 900;
-  for (let seq = 1; seq <= 12; seq++) stepWorld(held, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
+  for (let seq = 1; seq <= 14; seq++) stepWorld(held, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
   const snapshot = publicSnapshot(held).players[0];
   assert.equal(snapshot.actionPhase, 'charge');
   assert.ok(snapshot.chargeFrames >= 10);
@@ -2030,6 +2349,35 @@ test('ground roll and air dodge keep dodge state instead of becoming hitstun', (
   assert.equal(air.players[0].airDodgeAvailable, false);
 });
 
+test('roll invincibility avoids overlapping projectiles but vulnerable recovery can be hit', () => {
+  const world = worldWith(), roller = world.players[0], shooter = world.players[1];
+  roller.x = 600; shooter.x = 900;
+  stepWorld(world, { 0: frame(1, BUTTONS.RIGHT | BUTTONS.SHIELD, 1), 1: frame(1) });
+  assert.equal(roller.actionName, 'roll');
+  assert.ok(roller.invincible > 0);
+
+  const damageBeforeDodge = roller.damage;
+  world.entities.push({
+    id: world.nextEntityId++, type: 'projectile', owner: shooter.i, kind: 'roll-invincibility-test',
+    x: roller.x, y: roller.y, vx: 0, vy: 0, damage: 12, kx: 280, ky: 120,
+    life: 10, radius: 40, color: '#fff', hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(2), 1: frame(2) });
+  assert.equal(roller.damage, damageBeforeDodge, 'projectile must not hit during visible invincibility');
+  assert.deepEqual(world.entities.at(-1).hitPlayers, [], 'dodged projectile must not consume its hit');
+
+  let seq = 2;
+  while (roller.invincible > 0) stepWorld(world, { 0: frame(++seq), 1: frame(seq) });
+  assert.ok(roller.dodgeFrames > 0, 'roll recovery should remain after invincibility ends');
+  world.entities.push({
+    id: world.nextEntityId++, type: 'projectile', owner: shooter.i, kind: 'roll-recovery-test',
+    x: roller.x, y: roller.y, vx: 0, vy: 0, damage: 12, kx: 280, ky: 120,
+    life: 10, radius: 40, color: '#fff', hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(++seq), 1: frame(seq) });
+  assert.ok(roller.damage > damageBeforeDodge, 'projectile should hit during vulnerable roll recovery');
+});
+
 test('ground rolls carry the fighter a meaningful distance instead of turning in place', () => {
   const world = worldWith(), player = world.players[0], startX = player.x;
   stepWorld(world, { 0: frame(1, BUTTONS.LEFT | BUTTONS.SHIELD, -1), 1: frame(1) });
@@ -2037,6 +2385,23 @@ test('ground rolls carry the fighter a meaningful distance instead of turning in
   assert.equal(player.dodgeTotalFrames, player.dodgeFrames);
   for (let seq = 2; seq <= 22; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
   assert.ok(startX - player.x > 100, `expected roll travel above 100px, got ${startX - player.x}`);
+});
+
+test('consecutive opposite rolls restart their animation clock and preserve travel direction', () => {
+  const world = worldWith(), player = world.players[0];
+  stepWorld(world, { 0: frame(1, BUTTONS.LEFT | BUTTONS.SHIELD, -1), 1: frame(1) });
+  const firstSerial = player.dodgeSerial;
+  assert.equal(player.actionName, 'roll');
+  assert.ok(player.dodgeStartVx < 0);
+  for (let seq = 2; seq <= 23; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(player.dodgeFrames, 0);
+  assert.equal(player.dodgeElapsed, player.dodgeTotalFrames);
+  stepWorld(world, { 0: frame(24), 1: frame(24) });
+  stepWorld(world, { 0: frame(25, BUTTONS.RIGHT | BUTTONS.SHIELD, 1), 1: frame(25) });
+  assert.equal(player.actionName, 'roll');
+  assert.equal(player.dodgeSerial, firstSerial + 1);
+  assert.ok(player.dodgeElapsed <= 1, 'new roll animation must restart at its opening frame');
+  assert.ok(player.dodgeStartVx > 0, 'opposite roll must rotate and travel in the new direction');
 });
 
 test('ground rolls pass through an opponent and restore pushbox collision afterward', () => {
@@ -2098,6 +2463,13 @@ test('ledge attack places the fighter on top of the platform', () => {
   player.x = platform.x - 16; player.y = platform.y + 20; player.face = 1;
   stepWorld(world, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
   assert.equal(player.ledge, null);
+  assert.equal(player.actionName, 'ledgeAttackClimb');
+  assert.equal(player.grounded, false);
+  const startX = player.x, startY = player.y;
+  for (let seq = 2; seq <= 5; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.ok(player.x > startX && player.x < platform.x + 38);
+  assert.ok(player.y < startY && player.y > platform.y - player.height / 2);
+  for (let seq = 6; seq <= 9; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
   assert.equal(player.grounded, true);
   assert.equal(player.platformId, platform.id);
   assert.equal(player.y, platform.y - player.height / 2);
@@ -2119,10 +2491,12 @@ test('KO and disconnect release both sides of a grab', () => {
 test('boomerang reverses once and cannot hit the same target every frame', () => {
   const world = worldWith(), target = world.players[1];
   target.invincible = 0;
-  world.entities.push({ id: 99, type: 'projectile', owner: 0, kind: 'boomerang', x: target.x, y: target.y, vx: 120, vy: 0, damage: 6, kx: 120, ky: 80, life: 50, color: '#fff', hitPlayers: [] });
+  world.entities.push({ id: 99, type: 'projectile', owner: 0, kind: 'boomerang', x: target.x, y: target.y, vx: 120, vy: 0, damage: 6, kx: 120, ky: 80, life: 50, color: '#fff', returnDamageScale: .62, hitPlayers: [] });
   stepWorld(world, { 0: frame(1), 1: frame(1) });
   const entity = world.entities[0], firstDamage = target.damage;
   assert.equal(entity.returning, true); assert.equal(entity.vx, -120); assert.ok(firstDamage > 0);
+  assert.ok(Math.abs(entity.damage - 3.72) < 1e-9);
+  assert.ok(entity.kx < 120 && entity.ky < 80);
   stepWorld(world, { 0: frame(2), 1: frame(2) });
   assert.equal(entity.vx, -120); assert.equal(target.damage, firstDamage);
 });
@@ -2244,14 +2618,14 @@ test('up special can only be used once before landing or grabbing a ledge', () =
   assert.equal(player.action, null);
 });
 
-test('Nova warp recovery aims diagonally without excessive vertical height', () => {
-  const world = createWorld({ rules: { mode: 'training', stocks: 3 }, roster: [
+test('Nova uncharged warp recovery remains viable without excessive vertical height', () => {
+  const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'sky-rail' }, roster: [
     { slot: 0, clientId: 'nova', characterId: 'nova' },
     { slot: 1, clientId: 'dummy', characterId: 'volt' }
   ] });
   world.phase = 'active';
   const player = world.players[0];
-  player.x = 80; player.y = 650; player.face = 1; player.grounded = false; player.platformId = null; player.invincible = 0;
+  player.x = -120; player.y = 650; player.face = 1; player.grounded = false; player.platformId = null; player.invincible = 0;
   const startX = player.x, startY = player.y;
   let minimumY = startY;
   stepWorld(world, { 0: frame(1, BUTTONS.RIGHT | BUTTONS.UP | BUTTONS.SPECIAL, 1, -1), 1: frame(1) });
@@ -2260,12 +2634,12 @@ test('Nova warp recovery aims diagonally without excessive vertical height', () 
     minimumY = Math.min(minimumY, player.y);
   }
   const verticalReach = startY - minimumY;
-  assert.ok(verticalReach >= 185 && verticalReach <= 235, `expected balanced Nova vertical recovery, got ${verticalReach}`);
-  assert.ok(player.x > startX + 200, `expected Nova to retain diagonal warp reach, got ${player.x - startX}`);
+  assert.ok(verticalReach >= 165 && verticalReach <= 210, `expected viable uncharged Nova vertical recovery, got ${verticalReach}`);
+  assert.ok(player.x > startX + 170, `expected Nova to retain useful uncharged diagonal warp reach, got ${player.x - startX}`);
 });
 
 test('Nova neutral warp rises vertically, grants brief safety, and permits exit drift', () => {
-  const world = createWorld({ rules: { mode: 'training', stocks: 3 }, roster: [
+  const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'sky-rail' }, roster: [
     { slot: 0, clientId: 'nova', characterId: 'nova' },
     { slot: 1, clientId: 'dummy', characterId: 'volt' }
   ] });
@@ -2283,7 +2657,61 @@ test('Nova neutral warp rises vertically, grants brief safety, and permits exit 
   assert.ok(player.x > activatedX + 20, 'recovery drift should allow a ledge correction after reappearing');
   for (let seq = 14; seq <= 36; seq++) { stepWorld(world, { 0: frame(seq), 1: frame(seq) }); minimumY = Math.min(minimumY, player.y); }
   const verticalReach = startY - minimumY;
-  assert.ok(verticalReach >= 215 && verticalReach <= 245, `neutral vertical reach should remain bounded: ${verticalReach}`);
+  assert.ok(verticalReach >= 185 && verticalReach <= 225, `neutral uncharged vertical reach should remain bounded: ${verticalReach}`);
+});
+
+test('Nova blink and warp travel farther as X charge increases', () => {
+  const makeNovaWorld = () => {
+    const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'neon-deck' }, roster: [
+      { slot: 0, clientId: 'nova', characterId: 'nova' },
+      { slot: 1, clientId: 'dummy', characterId: 'volt' }
+    ] });
+    world.phase = 'active';
+    world.players[0].x = 420;
+    world.players[1].x = 1080;
+    world.players.forEach(player => { player.invincible = 0; });
+    return world;
+  };
+
+  const quick = makeNovaWorld(), quickNova = quick.players[0], quickStart = quickNova.x;
+  stepWorld(quick, { 0: frame(1, BUTTONS.RIGHT | BUTTONS.SPECIAL, 1), 1: frame(1) });
+  for (let seq = 2; seq <= 14; seq++) stepWorld(quick, { 0: frame(seq, BUTTONS.RIGHT, 1), 1: frame(seq) });
+  const quickDistance = quickNova.x - quickStart;
+
+  const charged = makeNovaWorld(), chargedNova = charged.players[0], chargedStart = chargedNova.x;
+  for (let seq = 1; seq <= 60; seq++) {
+    stepWorld(charged, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.SPECIAL, 1), 1: frame(seq) });
+  }
+  const chargedDistance = chargedNova.x - chargedStart;
+  assert.ok(chargedDistance > quickDistance + 70, `expected charge-scaled blink distance: ${quickDistance} -> ${chargedDistance}`);
+});
+
+test('Nova post-warp freefall remains finite and keeps directional drift responsive', () => {
+  const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'sky-rail' }, roster: [
+    { slot: 0, clientId: 'nova', characterId: 'nova' },
+    { slot: 1, clientId: 'dummy', characterId: 'volt' }
+  ] });
+  world.phase = 'active';
+  const player = world.players[0];
+  player.x = -120; player.y = 520; player.grounded = false; player.platformId = null;
+  stepWorld(world, { 0: frame(1, BUTTONS.UP | BUTTONS.SPECIAL, 0, -1), 1: frame(1) });
+  for (let seq = 2; seq <= 42; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+
+  assert.equal(player.freefall, true);
+  const beforeDrift = player.x;
+  for (let seq = 43; seq <= 54; seq++) {
+    stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT, 1, 0), 1: frame(seq) });
+  }
+  assert.ok(player.x > beforeDrift + 12, `post-warp drift should stay responsive: ${player.x - beforeDrift}`);
+
+  for (let seq = 55; seq <= 74; seq++) {
+    const vertical = seq % 2 ? -1 : 1;
+    const buttons = vertical < 0 ? BUTTONS.UP : BUTTONS.DOWN;
+    stepWorld(world, { 0: frame(seq, buttons, 0, vertical), 1: frame(seq) });
+    assert.ok(Number.isFinite(player.x) && Number.isFinite(player.y));
+    assert.ok(Number.isFinite(player.vx) && Number.isFinite(player.vy));
+  }
+  assert.equal(player.action, null, 'direction input must not restart or duplicate the warp');
 });
 
 test('walking off a platform preserves coyote jump instead of auto-grabbing the ledge', () => {
@@ -2304,6 +2732,52 @@ test('walking off after coyote time still leaves one usable air jump', () => {
   assert.ok(player.vy < -400); assert.equal(player.jumps, 0); assert.equal(player.doubleJumpSerial, 1);
 });
 
+test('Neon Deck main terrain is solid ground while its edges remain grabbable', () => {
+  const sideWorld = worldWith({ stageId: 'neon-deck' }), sidePlayer = sideWorld.players[0], ground = sideWorld.platforms[0];
+  assert.equal(ground.ground, true);
+  sidePlayer.grounded = false; sidePlayer.platformId = null; sidePlayer.coyoteFrames = 0; sidePlayer.invincible = 0;
+  sidePlayer.x = ground.x - sidePlayer.width / 2 - 2; sidePlayer.y = ground.y + 100;
+  sidePlayer.vx = 300; sidePlayer.vy = 0;
+  stepWorld(sideWorld, { 0: frame(1), 1: frame(1) });
+  assert.equal(sidePlayer.x, ground.x - sidePlayer.width / 2);
+  assert.ok(sidePlayer.vx <= 0, 'solid ground side must stop inward movement');
+
+  const belowWorld = worldWith({ stageId: 'neon-deck' }), belowPlayer = belowWorld.players[0], belowGround = belowWorld.platforms[0];
+  belowPlayer.grounded = false; belowPlayer.platformId = null; belowPlayer.coyoteFrames = 0; belowPlayer.invincible = 0;
+  const bodyTop = belowGround.y + 8;
+  belowPlayer.x = belowGround.x + belowGround.w / 2;
+  belowPlayer.y = bodyTop + belowPlayer.height / 2 + 2;
+  belowPlayer.vx = 0; belowPlayer.vy = -320;
+  stepWorld(belowWorld, { 0: frame(1), 1: frame(1) });
+  assert.ok(belowPlayer.y >= bodyTop + belowPlayer.height / 2, 'fighter below solid ground must not pass through its top');
+  assert.ok(belowPlayer.vy >= 0, 'solid ground underside must cancel upward velocity');
+
+  const ledgeWorld = worldWith({ stageId: 'neon-deck' }), ledgePlayer = ledgeWorld.players[0], ledgeGround = ledgeWorld.platforms[0];
+  ledgePlayer.grounded = false; ledgePlayer.platformId = null; ledgePlayer.coyoteFrames = 0; ledgePlayer.invincible = 0;
+  ledgePlayer.x = ledgeGround.x - 28; ledgePlayer.y = ledgeGround.y + 8;
+  ledgePlayer.vx = 300; ledgePlayer.vy = 40;
+  stepWorld(ledgeWorld, { 0: frame(1), 1: frame(1) });
+  assert.ok(ledgePlayer.ledge, 'solid side wall must not block the ledge catch window');
+
+  const attackWorld = worldWith({ stageId: 'neon-deck' }), attackPlayer = attackWorld.players[0], attackGround = attackWorld.platforms[0];
+  attackPlayer.grounded = false; attackPlayer.platformId = null; attackPlayer.coyoteFrames = 0; attackPlayer.invincible = 0;
+  attackPlayer.x = attackGround.x - attackPlayer.width / 2 - 2; attackPlayer.y = attackGround.y + 8;
+  attackPlayer.vx = 420; attackPlayer.vy = 0;
+  const aerial = { ...FIGHTERS[0].moves.airNeutral };
+  attackPlayer.action = { name: 'airNeutral', move: aerial, frame: 1, startup: aerial.startup, hit: [], activated: false };
+  attackPlayer.actionName = 'airNeutral';
+  stepWorld(attackWorld, { 0: frame(1), 1: frame(1) });
+  assert.ok(attackPlayer.x <= attackGround.x - attackPlayer.width / 2, 'an aerial action must collide with the solid side instead of entering it');
+
+  const embeddedWorld = worldWith({ stageId: 'neon-deck' }), embedded = embeddedWorld.players[0], embeddedGround = embeddedWorld.platforms[0];
+  embedded.grounded = false; embedded.platformId = null; embedded.coyoteFrames = 0; embedded.invincible = 0;
+  embedded.x = embeddedGround.x + embeddedGround.w / 2;
+  embedded.y = embeddedGround.y + 24;
+  embedded.vx = 0; embedded.vy = 120;
+  stepWorld(embeddedWorld, { 0: frame(1), 1: frame(1) });
+  assert.ok(embedded.y + embedded.height / 2 <= embeddedGround.y, 'a fighter already inside solid ground must be ejected through its nearest face');
+});
+
 test('late recovery input chains into the next action', () => {
   const world = worldWith(), player = world.players[0], move = { ...FIGHTERS[0].moves.groundNeutral };
   world.players[1].x = 1000;
@@ -2314,12 +2788,45 @@ test('late recovery input chains into the next action', () => {
   assert.ok(player.action); assert.equal(player.action.name, 'groundJab2'); assert.ok(player.action.frame <= 3);
 });
 
+test('late ultimate pre-input executes once while an early buffer expires cleanly', () => {
+  const lateWorld = worldWith(), late = lateWorld.players[0], move = { ...FIGHTERS[0].moves.groundNeutral };
+  lateWorld.players[1].x = 1000; late.ultimateMeter = 100;
+  late.action = { name: 'groundNeutral', move, frame: move.startup + move.active + move.recovery - 5, hit: [], activated: true, startup: move.startup };
+  late.actionName = 'groundNeutral';
+  stepWorld(lateWorld, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+  for (let seq = 2; seq <= 7; seq++) stepWorld(lateWorld, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(late.action?.name, 'ultimate');
+  assert.equal(lateWorld.events.filter(event => event.type === 'ultimate-start' && event.player === late.i).length, 1);
+
+  const earlyWorld = worldWith(), early = earlyWorld.players[0], longMove = { ...FIGHTERS[1].moves.groundSide };
+  earlyWorld.players[1].x = 1000; early.ultimateMeter = 100;
+  early.action = { name: 'groundSide', move: longMove, frame: 0, hit: [], activated: false, startup: longMove.startup };
+  early.actionName = 'groundSide';
+  stepWorld(earlyWorld, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+  for (let seq = 2; seq <= 14; seq++) stepWorld(earlyWorld, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(early.actionBuffer, null);
+  assert.notEqual(early.action?.name, 'ultimate');
+  assert.equal(early.ultimateMeter, 100);
+});
+
+test('holding a direction alone never cancels attack recovery', () => {
+  const world = worldWith(), player = world.players[0], move = { ...FIGHTERS[0].moves.groundNeutral };
+  world.players[1].x = 1000;
+  player.action = { name: 'groundNeutral', move, frame: move.startup + move.active + move.recovery - 5, hit: [], activated: true, startup: move.startup };
+  player.actionName = 'groundNeutral';
+
+  stepWorld(world, { 0: frame(1, BUTTONS.RIGHT, 1), 1: frame(1) });
+
+  assert.equal(player.action?.name, 'groundNeutral');
+  assert.equal(world.events.some(event => event.type === 'action-cancel'), false);
+});
+
 test('holding an early buffered attack preserves it and converts it into a smash when interruptible', () => {
   const world = worldWith(), player = world.players[0], move = { ...FIGHTERS[1].moves.dashAttack };
   world.players[1].x = 1000;
   player.action = { name: 'dashAttack', move, frame: move.startup + move.active, hit: [], activated: true, startup: move.startup };
   player.actionName = 'dashAttack';
-  for (let seq = 1; seq <= 16; seq++) stepWorld(world, { 0: frame(seq, BUTTONS.ATTACK), 1: frame(seq) });
+  for (let seq = 1; seq <= 16; seq++) stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.ATTACK, 1), 1: frame(seq) });
   assert.ok(world.events.some(event => event.type === 'action-cancel' && event.action === 'dashAttack'));
   assert.ok(player.action); assert.equal(player.action.name, 'groundSide'); assert.equal(player.action.variant, 'smash'); assert.equal(player.action.charging, true);
 });

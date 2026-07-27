@@ -13,7 +13,7 @@
 
       <section id="menu" class="overlay">
         <div class="menu-card">
-          <div class="eyebrow"><span></span> ONLINE BATTLE ARENA <b id="app-version">VERSION 확인 중</b></div>
+          <div class="eyebrow"><span></span> ONLINE BATTLE ARENA <b id="app-version">VERSION 확인 중</b><button id="patch-notes-button" type="button">PATCH NOTES</button></div>
           <h1>NEON<br /><em>RUMBLE</em></h1>
 
           <div class="identity-bar">
@@ -56,6 +56,15 @@
           </div>
           <div id="player-list" class="player-list hidden"></div>
         </div>
+        <section id="patch-notes" class="patch-notes hidden" role="dialog" aria-modal="true" aria-labelledby="patch-notes-title">
+          <div class="patch-notes-card">
+            <header>
+              <div><small>NEON RUMBLE UPDATE LOG</small><h2 id="patch-notes-title">PATCH NOTES</h2></div>
+              <button id="patch-notes-close" type="button" aria-label="패치노트 닫기">×</button>
+            </header>
+            <div id="patch-notes-list" class="patch-notes-list"><p>변경사항을 불러오는 중…</p></div>
+          </div>
+        </section>
       </section>
 
       <section id="waiting-room" class="waiting-room hidden" aria-label="온라인 대기방">
@@ -147,7 +156,7 @@
               <p><kbd>↑</kbd><span>점프 · 공중에서 한 번 더</span></p>
               <p><kbd>↓</kbd><span>하강 중 빠른 낙하 · 반투명 발판 통과</span></p>
               <p><kbd>↑ + Z</kbd><span>동시 입력 시 숏홉 공중 공격</span></p>
-              <p><kbd>Z</kbd><span>짧게 기본 공격 · 홀드하면 스매시 충전</span></p>
+              <p><kbd>Z</kbd><span>중립·공중·대시 기본 공격 즉시 발동</span></p>
               <p><kbd>X</kbd><span>필살기 · 중립/옆/위/아래 4방향</span></p>
               <p><kbd>V</kbd><span>지상 잡기 · 공중에서는 회피</span></p>
               <p><kbd>C</kbd><span>방어 · 지상/공중 회피 · 낙법</span></p>
@@ -157,10 +166,9 @@
             <h3>이동·공격</h3>
             <ul class="training-move-list">
               <li><kbd>Z × 3</kbd><span><b>잽(Jab)</b> 가장 빠르고 약한 3단 기본기. 근거리 탈출·피해 누적용</span></li>
-              <li><kbd>방향 → Z</kbd><span><b>강공격(Tilt)</b> 잽보다 강하고 길며, 스매시보다 빠르고 빈틈이 적음</span></li>
+              <li><kbd>방향 → Z 탭</kbd><span><b>강공격(Tilt)</b> Z를 짧게 놓으면 발동. 잽보다 강하고 길며, 스매시보다 빠르고 빈틈이 적음</span></li>
               <li><kbd>↗/↘ + Z</kbd><span><b>공격 각도 조절</b> 옆 틸트·스매시의 타점과 발사 각도를 위아래로 변경</span></li>
-              <li><kbd>Z 홀드</kbd><span><b>스매시 공격</b> 최대 1.4배까지 충전. 최대치에서 자동 발동하며 빗나가면 빈틈이 큼</span></li>
-              <li><kbd>방향 + Z 홀드</kbd><span><b>방향 스매시</b> 앞·위·아래 방향을 선택</span></li>
+              <li><kbd>Z 길게 홀드</kbd><span><b>스매시 공격</b> 14프레임부터 충전. 방향 없이 모으면 앞 스매시이며, 홀드 중 방향으로 위·아래·앞 선택</span></li>
               <li><kbd>대시 중 Z</kbd><span><b>대시 공격</b> 전진 판정이 길지만 막히거나 빗나가면 반격에 취약</span></li>
               <li><kbd>공중 Z</kbd><span><b>NAir</b> 빠르고 오래 남는 전신 판정. 근접 견제·탈출용</span></li>
               <li><kbd>공중 앞 + Z</kbd><span><b>FAir</b> 전방 범위가 넓은 콤보 시작·연계용</span></li>
@@ -212,7 +220,7 @@
           <section>
             <h3>잡기·기상</h3>
             <ul class="training-move-list">
-              <li><kbd>V</kbd><span><b>잡기</b> 실드 중 Z로도 잡기 가능</span></li>
+              <li><kbd>V</kbd><span><b>잡기</b> 실드 중 V 또는 Z로도 잡기 가능</span></li>
               <li><kbd>대시 중 V</kbd><span><b>대시 잡기</b> 발동은 느리지만 전진 거리와 잡기 범위가 증가</span></li>
               <li><kbd>잡은 뒤 Z/V</kbd><span><b>잡기 타격</b> 짧게 때려 피해를 누적. 욕심내면 상대가 탈출</span></li>
               <li><kbd>잡은 뒤 앞</kbd><span><b>앞 던지기</b> 가장 약하지만 상대를 절벽 쪽으로 밀어냄</span></li>

@@ -71,7 +71,7 @@
 
   const FIGHTERS = [
     fighter('volt', 'VOLT', '#26d9ff', '⚡', '초고속 러시다운',
-      { speed: 1.15, air: 1.12, jump: 1.08, weight: 0.92, power: 0.92, width: 48, height: 68, skid: 10 }, {
+      { speed: 1.15, air: 1.12, jump: 1.08, weight: 0.92, power: 0.92, width: 48, height: 68, skid: 9, walkSpeed: 220, runSpeed: 300, dashSpeed: 535, pivotDashSpeed: 520, dashAcceleration: 155, dashBrakeFrames: 3, dashBrakeControl: 190 }, {
         groundNeutral: { startup: 2, active: 2, recovery: 4, damage: 2.8, kx: 82, ky: 42, reachX: 54, hitstop: 4, motion: 'sparkJab' },
         groundJab2: { startup: 2, active: 2, recovery: 4, damage: 3.1, kx: 96, ky: 50, reachX: 58, hitstop: 4, motion: 'sparkJab' },
         groundJab3: { startup: 4, active: 3, recovery: 9, damage: 6.4, kx: 245, ky: 115, reachX: 72, motion: 'arcKick' },
@@ -90,10 +90,10 @@
         specialDown: { trap: null, trapOnly: false, radial: true, low: true, motion: 'discharge', startup: 8, active: 4, recovery: 20, damage: 6.5, kx: 105, ky: 80, reachX: 96, reachY: 48, knockbackGrowth: .25, groundedFlinch: true, hitstun: 20 }
       }),
     fighter('blaze', 'BLAZE', '#ff3b69', '◆', '중량급 파워',
-      { speed: 0.89, air: 0.9, jump: 0.92, weight: 1.1, power: 1.2, width: 60, height: 78, skid: 14 }, {
-        groundNeutral: { startup: 5, active: 3, recovery: 7, damage: 5.2, kx: 125, ky: 65, reachX: 64, motion: 'heavyJab' },
-        groundJab2: { startup: 5, active: 3, recovery: 8, damage: 5.8, kx: 145, ky: 75, reachX: 68, motion: 'heavyJab' },
-        groundJab3: { startup: 8, active: 4, recovery: 16, damage: 11.5, kx: 360, ky: 155, reachX: 86, motion: 'hammer' },
+      { speed: 0.89, air: 0.9, jump: 0.92, weight: 1.1, power: 1.2, width: 60, height: 78, skid: 14, walkSpeed: 202, runSpeed: 282, dashSpeed: 470, pivotDashSpeed: 450, dashAcceleration: 118, dashBrakeFrames: 5, dashBrakeControl: 145 }, {
+        groundNeutral: { startup: 4, active: 3, recovery: 6, damage: 5.2, kx: 125, ky: 65, reachX: 64, motion: 'heavyJab' },
+        groundJab2: { startup: 4, active: 3, recovery: 7, damage: 5.8, kx: 145, ky: 75, reachX: 68, motion: 'heavyJab' },
+        groundJab3: { startup: 7, active: 4, recovery: 14, damage: 11.5, kx: 360, ky: 155, reachX: 86, motion: 'hammer' },
         groundSide: { startup: 12, active: 4, recovery: 22, damage: 16.5, kx: 440, ky: 180, reachX: 106, reachY: 58, chargeable: true, sweetspot: .7, motion: 'hammer' },
         groundUp: { startup: 11, active: 5, recovery: 22, damage: 16, kx: 190, ky: 470, reachX: 76, reachY: 116, chargeable: true, motion: 'launcher' },
         groundDown: { startup: 9, active: 5, recovery: 18, damage: 14, kx: 365, ky: 85, reachX: 100, chargeable: true, motion: 'stomp' },
@@ -115,7 +115,7 @@
         }
       }),
     fighter('bolt', 'BOLT', '#ffd23f', '●', '트릭과 지형 제어',
-      { speed: 1.06, air: 1.04, jump: 1.02, weight: 1.07, power: 1.02, width: 56, height: 68, skid: 12, canCrawl: true }, {
+      { speed: 1.06, air: 1.04, jump: 1.02, weight: 1.07, power: 1.02, width: 56, height: 68, skid: 12, canCrawl: true, walkSpeed: 212, runSpeed: 292, dashSpeed: 495, pivotDashSpeed: 480, dashAcceleration: 135, dashBrakeFrames: 4, dashBrakeControl: 165 }, {
         groundNeutral: { startup: 3, active: 3, recovery: 5, damage: 3.8, kx: 105, ky: 58, reachX: 61, motion: 'orbJab' },
         groundJab2: { startup: 3, active: 3, recovery: 6, damage: 4.2, kx: 125, ky: 70, reachX: 66, motion: 'orbJab' },
         groundJab3: { startup: 6, active: 5, recovery: 12, damage: 8, kx: 290, ky: 140, reachX: 78, radial: true, motion: 'wheelSpin' },
@@ -128,13 +128,13 @@
         airBack: { startup: 7, active: 5, recovery: 14, landingLag: 9, damage: 12.5, kx: 390, ky: 185, reachX: 86, knockbackGrowth: 1.08, motion: 'backRoll' },
         airUp: { startup: 6, active: 7, recovery: 13, landingLag: 8, damage: 9.5, kx: 125, ky: 365, motion: 'springKick' },
         airDown: { startup: 11, active: 7, recovery: 20, landingLag: 13, damage: 14, kx: 90, ky: -405, reachX: 64, motion: 'wheelDrop' },
-        specialNeutral: { projectile: 'boomerang', projectileOnly: true, motion: 'throw', startup: 7, active: 2, recovery: 13, projectileSpeed: 500, projectileRadius: 32, projectileCooldown: 42, maxActiveProjectiles: 1 },
-        specialSide: { dash: 'roll', motion: 'roll', radial: true, startup: 6, active: 12, recovery: 15, dashSpeed: 510, recoveryDrag: 0.76, reachX: 74, reachY: 58, damage: 13.5, kx: 445, knockbackGrowth: 1.12 },
+        specialNeutral: { projectile: 'boomerang', projectileOnly: true, motion: 'throw', startup: 7, active: 2, recovery: 13, projectileSpeed: 500, projectileRadius: 32, projectileCooldown: 42, maxActiveProjectiles: 1, returnDamageScale: .62 },
+        specialSide: { dash: 'roll', motion: 'roll', radial: true, startup: 7, active: 9, recovery: 19, dashSpeed: 480, recoveryDrag: 0.72, reachX: 70, reachY: 56, damage: 11.5, kx: 385, knockbackGrowth: 1.02 },
         specialUp: { recoveryMove: true, recoveryKind: 'spring', causesFreefall: false, motion: 'spring', startup: 4, active: 6, recovery: 20, riseSpeed: 720, riseHorizontal: 200, damage: 8, ky: 270 },
-        specialDown: { trap: null, radial: true, low: true, motion: 'quake', reachX: 118, reachY: 56, startup: 8, active: 5, recovery: 17, damage: 15 }
+        specialDown: { trap: null, radial: true, low: true, motion: 'quake', reachX: 105, reachY: 52, startup: 10, active: 4, recovery: 22, damage: 11.5, kx: 300, ky: 205, knockbackGrowth: 1 }
       }),
     fighter('nova', 'NOVA', '#8b5cff', '✦', '공중 기동과 워프',
-      { speed: 1.03, air: 1.16, jump: 1.1, weight: 0.98, power: 0.96, width: 50, height: 72, skid: 11 }, {
+      { speed: 1.03, air: 1.16, jump: 1.1, weight: 0.98, power: 0.96, width: 50, height: 72, skid: 10, walkSpeed: 216, runSpeed: 296, dashSpeed: 510, pivotDashSpeed: 495, dashAcceleration: 145, dashBrakeFrames: 3, dashBrakeControl: 180 }, {
         groundNeutral: { startup: 3, active: 2, recovery: 5, damage: 3.4, kx: 95, ky: 55, reachX: 62, motion: 'starJab' },
         groundJab2: { startup: 3, active: 2, recovery: 6, damage: 3.8, kx: 112, ky: 65, reachX: 68, motion: 'starJab' },
         groundJab3: { startup: 5, active: 4, recovery: 12, damage: 7.4, kx: 275, ky: 135, reachX: 82, motion: 'crescent' },
@@ -148,11 +148,21 @@
         airUp: { startup: 5, active: 6, recovery: 12, landingLag: 7, damage: 9.5, kx: 120, ky: 380, reachY: 104, motion: 'starRise' },
         airDown: { startup: 9, active: 6, recovery: 18, landingLag: 10, damage: 12.5, kx: 80, ky: -380, reachX: 62, motion: 'cometDrop' },
         specialNeutral: { projectile: 'star', projectileOnly: true, motion: 'cast', startup: 7, active: 2, recovery: 13, damage: 8, projectileSpeed: 430, projectileRadius: 27, projectileCooldown: 36, maxActiveProjectiles: 1 },
-        specialSide: { dash: false, motion: 'blink', teleport: 125, teleportExitSpeed: 310, startup: 5, active: 4, recovery: 13, knockbackGrowth: 1.15 },
+        specialSide: {
+          dash: false, motion: 'blink', chargeable: true, distanceCharge: true,
+          maxChargeFrames: 60, chargeDamageScale: 1.1,
+          teleport: 110, teleportMin: 72, teleportMax: 230,
+          teleportExitSpeed: 270, teleportExitSpeedMin: 190, teleportExitSpeedMax: 335,
+          startup: 7, active: 4, recovery: 18, damage: 11.5, kx: 340, ky: 155, knockbackGrowth: 1.05
+        },
         specialUp: {
           recoveryMove: false, recoveryKind: 'warp', causesFreefall: true, motion: 'warp',
-          teleportY: 140, warpNeutralBonus: 15, teleportHorizontal: 190,
-          recoveryExitSpeed: 310, riseSpeed: 465, recoveryDrift: true, recoveryDriftControl: 1.35, warpInvincible: 3,
+          chargeable: true, distanceCharge: true, maxChargeFrames: 60, chargeDamageScale: 1.08,
+          teleportY: 140, teleportYMin: 120, teleportYMax: 184, warpNeutralBonus: 15,
+          teleportHorizontal: 190, teleportHorizontalMin: 150, teleportHorizontalMax: 255,
+          recoveryExitSpeed: 310, recoveryExitSpeedMin: 270, recoveryExitSpeedMax: 350,
+          riseSpeed: 465, riseSpeedMin: 430, riseSpeedMax: 530,
+          recoveryDrift: true, recoveryDriftControl: 1.35, warpInvincible: 3,
           startup: 4, active: 5, recovery: 19, landingLag: 12,
           damage: 9, kx: 145, ky: 345, reachX: 72, reachY: 96, vertical: true
         },
@@ -164,7 +174,7 @@
     {
       id: 'neon-deck', name: 'NEON DECK', color: '#26d9ff',
       platforms: [
-        { id: 'main', x: 210, y: 500, w: 860, h: 22 },
+        { id: 'main', x: 210, y: 500, w: 860, h: 22, ground: true, groundDepth: 320 },
         { id: 'left', x: 330, y: 375, w: 190, h: 12, passThrough: true },
         { id: 'right', x: 760, y: 375, w: 190, h: 12, passThrough: true }
       ], hazards: []
