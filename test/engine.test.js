@@ -651,7 +651,19 @@ test('aerial attacks preserve Ultimate-style directional roles', () => {
     assert.equal(dair.meteor, true, `${fighter.id} DAir should meteor`);
     assert.ok(dair.recovery >= fair.recovery, `${fighter.id} DAir should carry greater commitment`);
     assert.ok(dair.landingLag >= nair.landingLag, `${fighter.id} DAir should have meaningful landing lag`);
+    assert.ok(dair.startup <= 13, `${fighter.id} DAir should be practical to contest landings`);
+    assert.ok(dair.reachX >= 66, `${fighter.id} DAir should have a readable horizontal catch area`);
   }
+});
+
+test('low-usage moves keep distinct practical roles', () => {
+  const blaze = FIGHTERS.find(fighter => fighter.id === 'blaze');
+  const bolt = FIGHTERS.find(fighter => fighter.id === 'bolt');
+  assert.ok(blaze.moves.airNeutral.active >= 10);
+  assert.ok(blaze.moves.airNeutral.recovery <= 16);
+  assert.ok(bolt.moves.specialDown.ky > bolt.moves.specialDown.kx);
+  assert.ok(bolt.moves.specialDown.reachY < bolt.moves.specialSide.reachY);
+  for (const fighter of FIGHTERS) assert.ok(fighter.moves.groundUp.reachX >= 78);
 });
 
 test('X selects four grounded and airborne specials while Z plus X stays ultimate', () => {

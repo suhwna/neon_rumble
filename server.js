@@ -20,6 +20,8 @@ const secret = loadSecret();
 const queueWaitMs = Math.max(100, Number(process.env.NEON_QUEUE_WAIT_MS) || 20_000);
 const countdownTicks = Math.max(1, Number(process.env.NEON_COUNTDOWN_TICKS) || 180);
 const reconnectGraceMs = Math.max(100, Number(process.env.NEON_RECONNECT_MS) || 30_000);
+const SNAPSHOT_RATE = 30;
+const SNAPSHOT_INTERVAL_TICKS = Math.max(1, Math.round(TICK_RATE / SNAPSHOT_RATE));
 const store = new StatsStore(process.env.NEON_DB_PATH || path.join(__dirname, 'neon-rumble.sqlite'));
 let tickCostTotal = 0, tickCostSamples = 0, tickCostMax = 0;
 const recentTickCosts = [];
@@ -41,7 +43,7 @@ app.get('/healthz', (_req, res) => {
   const players = [...rooms.values()].reduce((sum, room) => sum + room.slots.length, 0);
   const sorted = [...recentTickCosts].sort((a, b) => a - b);
   const p95 = sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] || 0;
-  res.json({ ok: true, version: GAME_VERSION.version, protocol: GAME_VERSION.protocol, uptime: Math.floor((Date.now() - startedAt) / 1000), rooms: rooms.size, players, queued: queue.length, tickAvgMs: tickCostSamples ? +(tickCostTotal / tickCostSamples).toFixed(3) : 0, tickP95Ms: +p95.toFixed(3), tickMaxMs: +tickCostMax.toFixed(3) });
+  res.json({ ok: true, version: GAME_VERSION.version, protocol: GAME_VERSION.protocol, snapshotRate: SNAPSHOT_RATE, uptime: Math.floor((Date.now() - startedAt) / 1000), rooms: rooms.size, players, queued: queue.length, tickAvgMs: tickCostSamples ? +(tickCostTotal / tickCostSamples).toFixed(3) : 0, tickP95Ms: +p95.toFixed(3), tickMaxMs: +tickCostMax.toFixed(3) });
 });
 app.get('/version.json', (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -321,13 +323,15 @@ setInterval(() => {
   for (const room of rooms.values()) {
     if (room.playing && room.world) {
       stepWorld(room.world, room.demo ? {} : room.inputs);
-      const snapshot = publicSnapshot(room.world);
-      for (const slot of room.slots) if (slot.socketId) io.to(slot.socketId).volatile.emit('state:snapshot', snapshot);
+      if (room.world.tick % SNAPSHOT_INTERVAL_TICKS === 0 || room.world.phase === 'ended') {
+        const snapshot = publicSnapshot(room.world);
+        for (const slot of room.slots) if (slot.socketId) io.to(slot.socketId).volatile.emit('state:snapshot', snapshot);
+      }
       for (const input of Object.values(room.inputs)) input.pressedButtons = 0;
       finishRoom(room);
     } else if (room.warmupWorld) {
       stepWorld(room.warmupWorld, room.inputs);
-      if (room.warmupWorld.tick % 2 === 0) {
+      if (room.warmupWorld.tick % SNAPSHOT_INTERVAL_TICKS === 0) {
         const snapshot = publicSnapshot(room.warmupWorld);
         for (const slot of room.slots) if (slot.socketId) io.to(slot.socketId).volatile.emit('state:snapshot', snapshot);
       }

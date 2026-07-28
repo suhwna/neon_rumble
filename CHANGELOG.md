@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0-beta.5
+
+- Kept the authoritative simulation at 60Hz while reducing full-state broadcasts to 30Hz.
+- Added jitter-aware interpolation, foreground recovery, and browser runtime metrics.
+- Added four-player ownership markers, attack-direction silhouettes, and attacker-to-impact hit links.
+- Differentiated fighter attack key poses and clarified NOVA gravity-field range.
+- Improved low-usage down aerials, BLAZE neutral air, BOLT down special, and narrow up tilts.
+- Added Chromium E2E coverage for responsive layout, four-client room flow, reconnect, 80–150ms latency changes, 2% packet loss, FPS, snapshot rate, and particle budgets.
+- Added a desktop visual-regression baseline and documented the browser test workflow.
+
 ## 1.1.0-beta.4
 
 - Reworked grounded Z input: tap for jab/tilt, deliberate 14-frame hold for smash charge.

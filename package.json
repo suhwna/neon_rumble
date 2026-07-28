@@ -1,6 +1,6 @@
 {
   "name": "neon-rumble-online",
-  "version": "1.1.0-beta.4",
+  "version": "1.1.0-beta.5",
   "private": true,
   "description": "Online 4-player browser platform brawler",
   "main": "server.js",
@@ -8,12 +8,19 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
     "version:check": "node --test test/version.test.js"
   },
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "dependencies": {
     "express": "^5.1.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
   }
 }

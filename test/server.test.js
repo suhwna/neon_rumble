@@ -226,6 +226,7 @@ test('public queue starts a server-owned match with two players after the wait w
   const health = await fetch(`http://127.0.0.1:${port}/healthz`).then(response => response.json());
   assert.equal(health.ok, true);
   assert.equal(typeof health.tickP95Ms, 'number');
+  assert.equal(health.snapshotRate, 30);
 });
 
 test('solo bot match starts a normal stock battle and stays out of the public room directory', async () => {
