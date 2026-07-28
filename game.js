@@ -1190,8 +1190,10 @@ function paintBackground(target, stageDefinition) {
   ctx.fillStyle = 'rgba(255,255,255,.014)'; for (let y = -100; y < 820; y += 6) ctx.fillRect(-240, y, 1760, 1);
 }
 function drawBackground() {
+  const bounds = { x: -430, y: -330, width: WORLD_W + 860, height: WORLD_H + 620 };
+  if (window.NEON_ART?.drawStageBackground(ctx, stage, bounds)) return;
   if (!backgroundCache || backgroundCacheStage !== stage.id) {
-    const left = -430, top = -330, width = WORLD_W + 860, height = WORLD_H + 620;
+    const left = bounds.x, top = bounds.y, width = bounds.width, height = bounds.height;
     const texture = document.createElement('canvas');
     texture.width = width; texture.height = height;
     const backgroundContext = texture.getContext('2d', { alpha: false });
@@ -1200,7 +1202,7 @@ function drawBackground() {
     backgroundCache = texture;
     backgroundCacheStage = stage.id;
   }
-  ctx.drawImage(backgroundCache, -430, -330);
+  ctx.drawImage(backgroundCache, bounds.x, bounds.y);
 }
 function drawBlastZone(){ctx.save();ctx.strokeStyle='rgba(255,51,95,.32)';ctx.lineWidth=5;ctx.shadowBlur=7;ctx.shadowColor='#ff335f';ctx.setLineDash([14,18]);ctx.strokeRect(-360,-300,WORLD_W+720,WORLD_H+560);ctx.setLineDash([]);ctx.restore();}
 function paintPlatform(ctx, p, stageColor) {
@@ -3256,20 +3258,36 @@ function drawPlayer(p, dt) {
   ctx.shadowBlur=hitFlash?8:0;ctx.shadowColor=renderColor;ctx.lineCap='round';
   ctx.strokeStyle='#080d19';ctx.lineWidth=10;ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=5;ctx.stroke();ctx.shadowBlur=0;
-  ctx.beginPath();
-  if(fighter.id==='volt'){
-    const points=[[-headRadius*.9,-headRadius*.45],[-headRadius*.42,-headRadius*.72],[-headRadius*.12,-headRadius*1.25],[headRadius*.18,-headRadius*.78],[headRadius*.72,-headRadius*.98],[headRadius*.6,-headRadius*.42],[headRadius,0],[headRadius*.55,headRadius*.75],[-headRadius*.55,headRadius*.75],[-headRadius,0]];
-    points.forEach(([x,y],index)=>index?ctx.lineTo(x,headY+y):ctx.moveTo(x,headY+y));ctx.closePath();
-  }else if(fighter.id==='blaze'){
-    ctx.moveTo(-headRadius,headY+headRadius*.72);ctx.lineTo(-headRadius,headY-headRadius*.45);ctx.lineTo(-headRadius*.5,headY-headRadius*.78);ctx.lineTo(-headRadius*.22,headY-headRadius*1.3);ctx.lineTo(headRadius*.15,headY-headRadius*.78);ctx.lineTo(headRadius*.65,headY-headRadius*1.12);ctx.lineTo(headRadius,headY-headRadius*.38);ctx.lineTo(headRadius,headY+headRadius*.72);ctx.closePath();
-  }else if(fighter.id==='bolt'){
-    ctx.arc(0,headY,headRadius,0,Math.PI*2);ctx.moveTo(-headRadius,headY);ctx.lineTo(-headRadius-5,headY-5);ctx.moveTo(headRadius,headY);ctx.lineTo(headRadius+5,headY-5);ctx.moveTo(0,headY-headRadius);ctx.lineTo(0,headY-headRadius-7);ctx.arc(0,headY-headRadius-9,2,0,Math.PI*2);
-  }else{
-    ctx.moveTo(0,headY-headRadius*1.25);ctx.lineTo(headRadius,headY-headRadius*.2);ctx.lineTo(headRadius*.58,headY+headRadius);ctx.lineTo(0,headY+headRadius*.72);ctx.lineTo(-headRadius*.58,headY+headRadius);ctx.lineTo(-headRadius,headY-headRadius*.2);ctx.closePath();
+  const assetHeadDrawn = fighter.id === 'volt' && window.NEON_ART?.drawPart(ctx, 'volt.head', {
+    x: 0,
+    y: headY - 3,
+    face: p.face,
+    width: 49,
+    height: 49,
+    filter: fullBodyFlash
+      ? 'brightness(2.25) saturate(.15)'
+      : hitFlash
+        ? 'brightness(1.65) saturate(.65)'
+        : action === 'parrySuccess'
+          ? 'brightness(1.3) saturate(1.2)'
+          : ''
+  });
+  if (!assetHeadDrawn) {
+    ctx.beginPath();
+    if(fighter.id==='volt'){
+      const points=[[-headRadius*.9,-headRadius*.45],[-headRadius*.42,-headRadius*.72],[-headRadius*.12,-headRadius*1.25],[headRadius*.18,-headRadius*.78],[headRadius*.72,-headRadius*.98],[headRadius*.6,-headRadius*.42],[headRadius,0],[headRadius*.55,headRadius*.75],[-headRadius*.55,headRadius*.75],[-headRadius,0]];
+      points.forEach(([x,y],index)=>index?ctx.lineTo(x,headY+y):ctx.moveTo(x,headY+y));ctx.closePath();
+    }else if(fighter.id==='blaze'){
+      ctx.moveTo(-headRadius,headY+headRadius*.72);ctx.lineTo(-headRadius,headY-headRadius*.45);ctx.lineTo(-headRadius*.5,headY-headRadius*.78);ctx.lineTo(-headRadius*.22,headY-headRadius*1.3);ctx.lineTo(headRadius*.15,headY-headRadius*.78);ctx.lineTo(headRadius*.65,headY-headRadius*1.12);ctx.lineTo(headRadius,headY-headRadius*.38);ctx.lineTo(headRadius,headY+headRadius*.72);ctx.closePath();
+    }else if(fighter.id==='bolt'){
+      ctx.arc(0,headY,headRadius,0,Math.PI*2);ctx.moveTo(-headRadius,headY);ctx.lineTo(-headRadius-5,headY-5);ctx.moveTo(headRadius,headY);ctx.lineTo(headRadius+5,headY-5);ctx.moveTo(0,headY-headRadius);ctx.lineTo(0,headY-headRadius-7);ctx.arc(0,headY-headRadius-9,2,0,Math.PI*2);
+    }else{
+      ctx.moveTo(0,headY-headRadius*1.25);ctx.lineTo(headRadius,headY-headRadius*.2);ctx.lineTo(headRadius*.58,headY+headRadius);ctx.lineTo(0,headY+headRadius*.72);ctx.lineTo(-headRadius*.58,headY+headRadius);ctx.lineTo(-headRadius,headY-headRadius*.2);ctx.closePath();
+    }
+    ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8;ctx.fill();ctx.stroke();
+    ctx.strokeStyle=bodyColor;ctx.lineWidth=4;ctx.stroke();
+    ctx.strokeStyle=fullBodyFlash?'#101522':action==='parrySuccess'?'#fff36b':'#f7fbff';ctx.shadowBlur=action==='parrySuccess'?12:0;ctx.shadowColor='#fff36b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();ctx.shadowBlur=0;
   }
-  ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8;ctx.fill();ctx.stroke();
-  ctx.strokeStyle=bodyColor;ctx.lineWidth=4;ctx.stroke();
-  ctx.strokeStyle=fullBodyFlash?'#101522':action==='parrySuccess'?'#fff36b':'#f7fbff';ctx.shadowBlur=action==='parrySuccess'?12:0;ctx.shadowColor='#fff36b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();ctx.shadowBlur=0;
   if (action === 'dash' || action === 'pivot' || action === 'dashAttack') {
     const now = performance.now();
     const burst = action === 'dashAttack';

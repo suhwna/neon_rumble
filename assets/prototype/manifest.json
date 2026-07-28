@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "mode": "hybrid-canvas",
+  "generatedWith": "OpenAI built-in image generation",
+  "assets": {
+    "neon-deck.background": {
+      "file": "neon-deck/background.png",
+      "sourceSize": [1279, 720],
+      "role": "non-collidable stage backdrop",
+      "fallback": "procedural Canvas background"
+    },
+    "volt.head": {
+      "file": "fighters/volt/head.png",
+      "sourceSize": [384, 384],
+      "role": "mirrorable head attached to the existing Canvas joint rig",
+      "anchor": [0.5, 0.52],
+      "displaySize": [49, 49],
+      "fallback": "procedural VOLT head"
+    }
+  }
+}
