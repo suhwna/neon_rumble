@@ -32,3 +32,15 @@ test('incoming projectile threat only reports projectiles moving toward the CPU'
   world.entities[0].vx = 220;
   assert.equal(findIncomingThreat(world, self, owner), null);
 });
+
+test('incoming melee threat includes a third fighter outside the current target lock', () => {
+  const self = player(0, 400);
+  const target = player(1, 720);
+  const third = player(2, 445, {
+    action: { frame: 3, startup: 5, move: { startup: 5, active: 4, reachX: 70, reachY: 70 } }
+  });
+  const world = { players: [self, target, third], rules: { teams: false }, entities: [] };
+  assert.deepEqual(findIncomingThreat(world, self, target), {
+    kind: 'attack', direction: 1, attacker: 2
+  });
+});

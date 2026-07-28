@@ -2,10 +2,15 @@ const { BUTTONS, FIGHTERS, STAGES, ITEMS, DEFAULT_RULES } = require('./content')
 const {
   CPU_PROFILES,
   blazeAirNeutralWanted,
-  blazeNeutralChargeFrames
+  blazeNeutralChargeFrames,
+  chooseCombatPlan,
+  fighterDefenseChance,
+  preferredCombatRange,
+  boltBoomerangWanted
 } = require('./cpu-policy');
 const { selectRecoveryTarget, isOffstage } = require('./cpu-navigation');
 const { selectCpuTarget, findIncomingThreat } = require('./cpu-combat');
+const { planCpuRecovery } = require('./cpu-recovery');
 
 const TICK_RATE = 60;
 const WORLD_W = 1280;
@@ -2479,48 +2484,6 @@ function cpuBrain(world, player) {
   return world.cpuBrains.get(player.i);
 }
 
-function decideCpuRecovery(world, player, profile) {
-  const recovery = selectRecoveryTarget(world.platforms, player);
-  const toward = Math.sign(recovery.x - player.x);
-  if (player.ledge) {
-    const roll = world.rng() < profile.defense * .35;
-    return cpuInput(world, roll ? -player.face : 0, roll ? 0 : -1, roll ? BUTTONS.SHIELD : 0);
-  }
-  if (player.stun > 0) {
-    const landingSoon = player.vy > 0 && Math.abs(player.y - recovery.platform.y) < 100;
-    return cpuInput(world, toward, 0, landingSoon && profile.accuracy > .7 ? BUTTONS.SHIELD : 0);
-  }
-  const heightBelow = player.y - recovery.platform.y;
-  const horizontalGap = Math.abs(recovery.x - player.x);
-  const farSide = horizontalGap > 135;
-  const falling = player.vy > 35;
-  const emergency = player.y > BLAST_BOTTOM - 185
-    || player.x < -BLAST_MARGIN_X + 150
-    || player.x > WORLD_W + BLAST_MARGIN_X - 150;
-
-  // Spend the renewable air jump before the single-use recovery whenever
-  // there is enough room. The old order burned Up-X first when far sideways,
-  // leaving the CPU in freefall with no final correction.
-  if (!player.freefall && player.jumps > 0 && (falling || heightBelow > -70 || emergency)) {
-    return cpuInput(world, toward, -1);
-  }
-
-  const recoveryNeeded = emergency
-    || heightBelow > 105
-    || player.jumps <= 0 && (falling || farSide && heightBelow > -55);
-  if (player.recoveryAvailable && recoveryNeeded) {
-    return cpuInput(world, toward, -1, BUTTONS.SPECIAL);
-  }
-
-  // A directional air dodge is the final small correction near a ledge, not
-  // an early substitute for jump or Up-X.
-  const nearLedge = horizontalGap < 115 && Math.abs(heightBelow) < 125;
-  if (!player.freefall && player.airDodgeAvailable && nearLedge && falling && profile.accuracy > .7) {
-    return cpuInput(world, toward, -1, BUTTONS.SHIELD);
-  }
-  return cpuInput(world, toward, 0);
-}
-
 function decideCpuInput(world, player, difficulty) {
   if (difficulty === 'dummy') return cpuInput(world);
   const profile = CPU_PROFILES[difficulty] || CPU_PROFILES.normal;
@@ -2545,7 +2508,12 @@ function decideCpuInput(world, player, difficulty) {
   // Recovery, DI and ledge choices are checked every frame; waiting for the
   // normal decision interval here makes even a strong CPU casually self-destruct.
   if (player.ledge || isOffstage(world.platforms, player)) {
-    brain.input = decideCpuRecovery(world, player, profile);
+    const recoveryIntent = planCpuRecovery(world, player, profile, {
+      worldWidth: WORLD_W, marginX: BLAST_MARGIN_X, bottom: BLAST_BOTTOM
+    });
+    brain.input = cpuInput(
+      world, recoveryIntent.horizontal, recoveryIntent.vertical, recoveryIntent.actions
+    );
     brain.actionRelease = world.tick + 1;
     return brain.input;
   }
@@ -2592,15 +2560,23 @@ function decideCpuInput(world, player, difficulty) {
   const threat = findIncomingThreat(world, player, target);
   const projectileFighter = !!characterOf(player).moves.specialNeutral.projectile;
   if (world.tick >= brain.planUntil) {
-    if (target.shielding || target.stun > 0 || target.landingLag > 0 || quietFrames >= 54) brain.plan = 'pressure';
-    else if (projectileFighter && player.projectileCooldown <= 0 && distance > 145) brain.plan = 'zone';
-    else if (player.damage > target.damage + 38) brain.plan = 'bait';
-    else brain.plan = 'pressure';
+    brain.plan = chooseCombatPlan({
+      fighterId: player.characterId,
+      targetShielding: target.shielding,
+      targetVulnerable: target.stun > 0 || target.landingLag > 0,
+      quietFrames,
+      projectileReady: projectileFighter && player.projectileCooldown <= 0,
+      distance,
+      playerDamage: player.damage,
+      targetDamage: target.damage
+    });
     brain.planUntil = world.tick + (difficulty === 'hard' ? 42 : 60);
   }
   const forcingInitiative = difficulty === 'hard' && quietFrames >= 54;
   const pressuring = brain.plan === 'pressure' || forcingInitiative;
-  const defenseChance = forcingInitiative ? combatProfile.defense * .68 : combatProfile.defense;
+  const defenseChance = fighterDefenseChance(
+    combatProfile.defense, player.characterId, player.damage, forcingInitiative
+  );
   const aggression = combatProfile.aggression;
   const canAct = !player.action && player.landingLag <= 0 && player.shieldStun <= 0 && player.dodgeFrames <= 0;
   const targetMove = target.action?.move;
@@ -2650,9 +2626,13 @@ function decideCpuInput(world, player, difficulty) {
   }
   if (!chosen && canAct && player.characterId === 'bolt' && player.grounded
     && distance > 145 && distance < 360 && player.projectileCooldown <= 0
-    && brain.plan === 'zone'
-    && world.tick >= (brain.boomerangPlanUntil || 0)
-    && world.rng() < (difficulty === 'hard' ? .62 : .42)
+    && boltBoomerangWanted({
+      plan: brain.plan,
+      tick: world.tick,
+      cooldownUntil: brain.boomerangPlanUntil || 0,
+      difficulty,
+      roll: world.rng()
+    })
     && !world.entities.some(entity => entity.owner === player.i && entity.kind === 'boomerang' && entity.life > 0)) {
     chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
     brain.boomerangPlanUntil = world.tick + 72;
@@ -2786,7 +2766,12 @@ function decideCpuInput(world, player, difficulty) {
     chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
   }
   if (!chosen) {
-    const preferredRange = pressuring ? 78 : brain.plan === 'zone' && projectileFighter ? 165 : 112;
+    const preferredRange = preferredCombatRange({
+      fighterId: player.characterId,
+      plan: brain.plan,
+      pressuring,
+      projectileFighter
+    });
     const move = riskyEdgePursuit ? 0 : distance > preferredRange + 30 ? toward : distance < preferredRange - 28 ? -toward : 0;
     const jump = target.y < player.y - 95 && player.grounded && world.rng() < combatProfile.accuracy * .55;
     chosen = cpuInput(world, move, jump ? -1 : 0);

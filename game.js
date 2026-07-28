@@ -1905,7 +1905,16 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
     } else if (action === 'groundUp' || action === 'airUp') {
       styled.frontHandY -= 9 * phaseWeight; styled.backHandY -= 5 * phaseWeight; styled.scaleY *= 1 + .06 * phaseWeight;
     } else if (action === 'airNeutral') {
-      styled.frontFootX += 7 * active; styled.backFootX -= 7 * active; styled.rotation += .12 * active;
+      // VOLT leads with a long single-leg kick while the rear side stays
+      // tucked. This keeps its silhouette directional instead of becoming
+      // the shared two-sided aerial pose.
+      styled.frontFootX += 13 * active;
+      styled.frontFootLift -= 4 * active;
+      styled.backFootX += 8 * active;
+      styled.backFootLift += 8 * active;
+      styled.frontHandY -= 8 * active;
+      styled.backHandY += 7 * active;
+      styled.rotation += .16 * active;
     } else if (action === 'specialUp') {
       styled.frontHandX += 8 * active;
       styled.frontHandY -= 9 * phaseWeight;
@@ -1928,7 +1937,17 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.backHandY = lerp(styled.backHandY, styled.frontHandY + 7, active * .72);
     }
     if (action === 'airNeutral') {
-      styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.frontFootX += 8 * active; styled.backFootX -= 8 * active;
+      // BLAZE uses a compact armored body-check: shoulders and forearms are
+      // the readable contact shape while both knees remain under its weight.
+      styled.frontHandX += 15 * phaseWeight;
+      styled.backHandX += 22 * active;
+      styled.frontHandY += 8 * active;
+      styled.backHandY += 12 * active;
+      styled.frontFootX -= 27 * active;
+      styled.backFootX += 17 * active;
+      styled.frontFootLift += 14 * active;
+      styled.backFootLift += 11 * active;
+      styled.rotation -= .08 * active;
     } else if (action === 'airDown') {
       styled.frontHandX += 5 * phaseWeight; styled.backHandX -= 5 * phaseWeight; styled.scaleY *= 1 + .1 * active;
     } else if (action === 'specialUp') {
@@ -1955,7 +1974,19 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.frontFootLift += 5 * Math.max(0, twist);
       styled.backFootLift += 5 * Math.max(0, -twist);
     }
-    if (action === 'groundDown' || action === 'specialDown') {
+    if (action === 'airNeutral') {
+      // BOLT curls into a compact wheel. The body rotation and tucked knees
+      // distinguish it from the long-limbed kicks without adding effects.
+      styled.frontHandX -= 17 * active;
+      styled.backHandX += 15 * active;
+      styled.frontFootX -= 26 * active;
+      styled.backFootX += 17 * active;
+      styled.frontFootLift += 17 * active;
+      styled.backFootLift += 18 * active;
+      styled.rotation += .34 * active;
+      styled.scaleX *= 1 - .12 * active;
+      styled.scaleY *= 1 + .08 * active;
+    } else if (action === 'groundDown' || action === 'specialDown') {
       styled.bodyY += 5 * active; styled.frontFootX += 7 * active; styled.backFootX -= 7 * active;
     } else if (action === 'specialUp') {
       styled.rotation += .22 * active;
@@ -1989,6 +2020,19 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       }
     } else if (action === 'airDown') {
       styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.scaleX *= 1 + .08 * active;
+    } else if (action === 'airNeutral') {
+      // NOVA opens into a diagonal star rather than a horizontal split. Its
+      // limbs point to four quadrants so it remains readable in a crowded air
+      // scramble without relying on particles.
+      styled.frontHandY -= 16 * active;
+      styled.backHandY += 17 * active;
+      styled.frontHandX += 8 * active;
+      styled.backHandX -= 9 * active;
+      styled.frontFootX -= 10 * active;
+      styled.backFootX -= 10 * active;
+      styled.frontFootLift += 12 * active;
+      styled.backFootLift -= 5 * active;
+      styled.rotation -= .13 * active;
     } else if (motion === 'gravity') {
       styled.frontHandX += 9 * active; styled.backHandX -= 9 * active; styled.frontHandY += 9 * active; styled.backHandY += 9 * active;
     }
@@ -3314,79 +3358,6 @@ function drawPlayer(p, dt) {
     if (p.actionHitbox) { const box=p.actionHitbox;ctx.strokeStyle='#ff426a';ctx.fillStyle='rgba(255,66,106,.14)';ctx.lineWidth=3;if(box.type==='circle'){ctx.beginPath();ctx.arc(box.x,box.y,box.radius,0,Math.PI*2);ctx.fill();ctx.stroke();}else{ctx.fillRect(box.x-box.w/2,box.y-box.h/2,box.w,box.h);ctx.strokeRect(box.x-box.w/2,box.y-box.h/2,box.w,box.h);} }
   }
 }
-function drawBattleHUDLegacy(){
-  const count=Math.max(1,players.length),gap=count===4?8:12,maxCard=count<=2?340:count===3?320:294;
-  const cardW=Math.min(maxCard,(WORLD_W-30-gap*(count-1))/count),cardH=96;
-  const total=cardW*count+gap*(count-1),startX=(WORLD_W-total)/2,y=WORLD_H-cardH-10;
-  const pulse=.72+Math.sin(performance.now()/115)*.28;
-  players.forEach((p,index)=>{
-    const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];
-    const color=fighter.palettes[p.palette%fighter.palettes.length];
-    const x=startX+index*(cardW+gap),damage=Math.max(0,Math.round(p.damage)),danger=clamp(p.damage/160,0,1);
-    const ultimate=clamp((p.ultimateMeter||0)/100,0,1);
-    const damageColor=danger<.48?'#ffffff':danger<.82?'#ffd35d':'#ff496f';
-    const barX=x+166,barW=Math.max(72,cardW-178);
-    ctx.save();
-    ctx.globalAlpha=p.eliminated?.42:1;
-    ctx.shadowColor='rgba(0,0,0,.62)';ctx.shadowBlur=18;ctx.shadowOffsetY=7;
-    const shell=ctx.createLinearGradient(x,y,x,y+cardH);
-    shell.addColorStop(0,'rgba(26,31,47,.96)');shell.addColorStop(.52,'rgba(10,14,27,.96)');shell.addColorStop(1,'rgba(4,7,15,.98)');
-    ctx.fillStyle=shell;ctx.beginPath();ctx.moveTo(x+10,y);ctx.lineTo(x+cardW-8,y);ctx.lineTo(x+cardW,y+8);ctx.lineTo(x+cardW,y+cardH-8);ctx.lineTo(x+cardW-9,y+cardH);ctx.lineTo(x,y+cardH);ctx.lineTo(x,y+10);ctx.closePath();ctx.fill();
-    ctx.shadowBlur=0;ctx.shadowOffsetY=0;
-    ctx.strokeStyle=p.i===myIndex?color:'rgba(255,255,255,.17)';ctx.lineWidth=p.i===myIndex?2.2:1;
-    ctx.beginPath();ctx.moveTo(x+10,y);ctx.lineTo(x+cardW-8,y);ctx.lineTo(x+cardW,y+8);ctx.lineTo(x+cardW,y+cardH-8);ctx.lineTo(x+cardW-9,y+cardH);ctx.lineTo(x,y+cardH);ctx.lineTo(x,y+10);ctx.closePath();ctx.stroke();
-    ctx.fillStyle=color;ctx.fillRect(x+10,y,x+cardW-18,3);
-
-    const portraitX=x+48,portraitY=y+50;
-    ctx.save();ctx.beginPath();ctx.arc(portraitX,portraitY,38,0,Math.PI*2);ctx.clip();
-    const portrait=ctx.createRadialGradient(portraitX-9,portraitY-12,5,portraitX,portraitY,42);
-    portrait.addColorStop(0,'#ffffff');portrait.addColorStop(.12,color);portrait.addColorStop(1,'rgba(8,11,23,.96)');
-    ctx.fillStyle=portrait;ctx.fillRect(portraitX-42,portraitY-42,84,84);
-    ctx.globalAlpha=.22;ctx.strokeStyle='#fff';ctx.lineWidth=2;
-    for(let stripe=-54;stripe<54;stripe+=12){ctx.beginPath();ctx.moveTo(portraitX+stripe,portraitY+42);ctx.lineTo(portraitX+stripe+54,portraitY-42);ctx.stroke();}
-    ctx.globalAlpha=1;ctx.fillStyle='#070c19';ctx.font='900 31px Inter';ctx.textAlign='center';ctx.fillText(fighter.icon,portraitX,portraitY+11);ctx.restore();
-    ctx.strokeStyle=color;ctx.lineWidth=3;ctx.beginPath();ctx.arc(portraitX,portraitY,38,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='rgba(3,6,14,.9)';ctx.beginPath();ctx.roundRect(x+16,y+74,65,17,8);ctx.fill();
-    ctx.fillStyle='#fff';ctx.font='900 8px Inter';ctx.textAlign='center';ctx.fillText(fighter.name,x+48,y+85);
-
-    ctx.textAlign='left';ctx.fillStyle='#f7f8ff';ctx.font='900 10px Inter';
-    const tag=String(playerTag(p)).slice(0,count===4?12:18);ctx.fillText(tag,x+91,y+17);
-    if(p.i===myIndex){ctx.fillStyle=color;ctx.font='900 7px Inter';ctx.fillText('YOU',x+91,y+28);}
-    ctx.fillStyle=damageColor;ctx.shadowColor=damageColor;ctx.shadowBlur=danger>.8?9*pulse:0;
-    ctx.font='900 43px Inter';const damageText=String(damage);ctx.fillText(damageText,x+88,y+66);
-    const damageWidth=ctx.measureText(damageText).width;ctx.shadowBlur=0;ctx.font='900 17px Inter';ctx.fillText('%',x+91+damageWidth,y+65);
-
-    ctx.textAlign='right';ctx.fillStyle='rgba(255,255,255,.72)';ctx.font='900 7px Inter';ctx.fillText(rules.mode==='time'?'SCORE':'STOCK',x+cardW-12,y+16);
-    const lifeDisplay=rules.mode==='training'?'∞':rules.mode==='time'?`${p.score>=0?'+':''}${p.score}`:`×${Math.max(0,p.stocks)}`;
-    ctx.fillStyle=color;ctx.font='900 15px Inter';ctx.fillText(lifeDisplay,x+cardW-12,y+31);
-
-    ctx.textAlign='left';ctx.font='900 6px Inter';ctx.fillStyle=shield<.3?'#ff5b78':'#8deeff';ctx.fillText('GUARD',barX,y+47);
-    ctx.fillStyle='rgba(255,255,255,.12)';ctx.beginPath();ctx.roundRect(barX,y+51,barW,8,4);ctx.fill();
-    const shieldGradient=ctx.createLinearGradient(barX,y+51,barX+barW,y+51);
-    shieldGradient.addColorStop(0,shield<.3?'#ff3c65':'#55d9ff');shieldGradient.addColorStop(1,shield<.3?'#ff9a58':'#d8fbff');
-    ctx.fillStyle=shieldGradient;if(shield>0){ctx.beginPath();ctx.roundRect(barX,y+51,Math.max(4,barW*shield),8,4);ctx.fill();}
-    ctx.textAlign='right';ctx.fillStyle='rgba(255,255,255,.72)';ctx.font='900 6px Inter';ctx.fillText(`${Math.round(shield*100)}`,barX+barW,y+47);
-
-    ctx.textAlign='left';ctx.fillStyle=ultimate>=1?'#fff7ae':color;ctx.font='900 6px Inter';ctx.fillText(ultimate>=1?'FINAL READY':'FINAL',barX,y+70);
-    ctx.fillStyle='rgba(255,255,255,.11)';ctx.beginPath();ctx.roundRect(barX,y+74,barW,11,3);ctx.fill();
-    if(ultimate>0){
-      const finalGradient=ctx.createLinearGradient(barX,y+74,barX+barW,y+74);
-      finalGradient.addColorStop(0,color);finalGradient.addColorStop(.72,ultimate>=1?'#fff36b':'#ff6ed5');finalGradient.addColorStop(1,'#ffffff');
-      ctx.fillStyle=finalGradient;ctx.shadowColor=ultimate>=1?'#fff36b':color;ctx.shadowBlur=ultimate>=1?14*pulse:5;
-      ctx.beginPath();ctx.roundRect(barX,y+74,Math.max(4,barW*ultimate),11,3);ctx.fill();ctx.shadowBlur=0;
-    }
-    ctx.strokeStyle='rgba(5,8,18,.62)';ctx.lineWidth=1;
-    for(let segment=1;segment<4;segment++){const sx=barX+barW*segment/4;ctx.beginPath();ctx.moveTo(sx,y+74);ctx.lineTo(sx,y+85);ctx.stroke();}
-    if(ultimate>=1){ctx.fillStyle='#fff';ctx.font='900 7px Inter';ctx.textAlign='right';ctx.fillText('Z + X',barX+barW,y+70);}
-    ctx.restore();
-  });
-  if(state==='playing'){
-    ctx.save();ctx.fillStyle='rgba(5,8,18,.88)';ctx.beginPath();ctx.roundRect(520,10,240,38,19);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.16)';ctx.stroke();
-    ctx.textAlign='center';ctx.fillStyle='#fff';ctx.font='900 19px Inter';ctx.fillText(formatTime(remainingTicks),640,35);
-    ctx.textAlign='left';ctx.fillStyle=stage.color;ctx.font='900 9px Inter';ctx.fillText(stage.name,535,33);
-    ctx.textAlign='right';ctx.fillStyle=ping<70?'#67f59b':ping<130?'#ffca3a':'#ff426a';ctx.fillText(`${Math.round(ping)}ms`,744,33);ctx.restore();
-  }
-}
 function drawHudFighterPortrait(fighter,color,x,y,r){
   ctx.save();ctx.translate(x,y);
   const portrait=ctx.createRadialGradient(-r*.26,-r*.32,r*.08,0,0,r);
@@ -3631,75 +3602,17 @@ function formatTime(ticks){if(rules.mode==='training')return '∞';const seconds
 
 if (new URLSearchParams(location.search).get('visualTest') === '1') {
   window.__NEON_SET_VISUAL_FIXTURE__ = (fixture = 'motion-grid') => {
-    const motionAudit = /^motion:([A-Za-z0-9]+):(startup|active|recovery)$/.exec(fixture);
-    const makePlayer = (fighter, index, x, action, options = {}) => {
-      const move = fighter.moves[action] || {};
-      const y = (options.floorY ?? 500) - fighter.height / 2, direction = options.face || 1;
-      const strikePoints = action === 'groundHit' || move.projectileOnly || move.trapOnly
-        ? []
-        : action.includes('Up')
-          ? [{ x: x + direction * 7, y: y - Math.min(54, (move.reachY || 90) * .52) }]
-          : action.includes('Down')
-            ? [{ x: x + direction * Math.min(48, (move.reachX || 80) * .48), y: y + fighter.height * .3 }]
-            : [{ x: x + direction * Math.min(52, (move.reachX || 80) * .52), y: y - 5 }];
-      return {
-        i: index, clientId: `fixture:${fighter.id}`, nickname: fighter.name,
-        characterId: fighter.id, palette: index, team: null,
-        x, y, vx: options.vx || 0, vy: options.vy || 0,
-        face: direction, width: fighter.width, height: fighter.height,
-        grounded: options.grounded ?? true, platformId: options.grounded === false ? null : 'main', jumps: 2, damage: 35 + index * 17,
-        stocks: 3, score: 0, shield: SHIELD_MAX, shielding: false, invincible: 0,
-        eliminated: false, respawn: 0, respawnPlatformFrames: 0,
-        actionName: action, actionPhase: options.phase ?? (action === 'groundHit' ? null : 'active'),
-        actionVariant: options.variant || null, actionMotion: move.motion || null,
-        actionFrame: options.actionFrame || move.startup || 0,
-        actionTiming: { startup: move.startup || 1, active: move.active || 1, recovery: move.recovery || 1 },
-        phaseProgress: options.progress ?? .28, actionHitbox: null, strikePoints,
-        chargeFrames: options.chargeFrames || 0, chargeScale: 1,
-        stun: action === 'groundHit' ? 12 : 0, hitstop: options.hitstop || 0,
-        movementState: 'idle', dashFrames: 0, dashAge: 0, dashDirection: 0,
-        dodgeFrames: 0, dodgeTotalFrames: 0, dodgeElapsed: 0,
-        ledge: null, grabbedBy: null, grabbing: null, landingLag: 0,
-        tumbling: false, freefall: false, knockdownFrames: 0,
-        ultimateMeter: 45 + index * 12,
-        impactVisualUntil: action === 'groundHit' ? Number.POSITIVE_INFINITY : 0,
-        impactVisualStrength: options.impactStrength || 1,
-        impactVisualAngle: options.impactAngle || 0
-      };
-    };
+    const built = window.NEON_VISUAL_FIXTURES.build(fixture, {
+      fighters: FIGHTERS, stages: STAGES, defaultRules: DEFAULT_RULES, shieldMax: SHIELD_MAX
+    });
     visualFixtureActive = true;
-    state = 'fixture'; rules = { ...DEFAULT_RULES, mode: 'stock', stocks: 3, timeSeconds: 420 };
-    stage = STAGES[0]; platforms = stage.platforms.map(platform => ({ ...platform }));
+    state = 'fixture'; rules = built.rules;
+    stage = built.stage; platforms = built.platforms;
     entities = []; items = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = [];
-    camera = { x: 640, y: 390, zoom: fixture === 'four-player-impact' ? 1.12 : .94 };
+    camera = built.camera;
     menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
     countdown.classList.add('hidden'); trainingPanel.classList.add('hidden'); game.classList.remove('hidden');
-    if (motionAudit) {
-      const [, action, phase] = motionAudit;
-      const positions = [275, 515, 755, 995];
-      players = FIGHTERS.map((fighter, index) => makePlayer(fighter, index, positions[index], action, {
-        face: index < 2 ? 1 : -1,
-        grounded: !action.startsWith('air'),
-        floorY: action.startsWith('air') ? 420 : 500,
-        phase,
-        progress: phase === 'startup' ? .72 : phase === 'active' ? .28 : .35,
-        variant: action.startsWith('ground') && action !== 'groundNeutral' ? 'tilt' : null
-      }));
-    } else if (fixture === 'four-player-impact') {
-      players = [
-        makePlayer(FIGHTERS[0], 0, 535, 'groundSide', { face: 1, progress: .25 }),
-        makePlayer(FIGHTERS[1], 1, 615, 'groundHit', { face: -1, impactAngle: 0, impactStrength: 1.3 }),
-        makePlayer(FIGHTERS[2], 2, 685, 'groundDown', { face: -1, progress: .35 }),
-        makePlayer(FIGHTERS[3], 3, 755, 'groundHit', { face: 1, impactAngle: Math.PI, impactStrength: .85 })
-      ];
-    } else {
-      players = [
-        makePlayer(FIGHTERS[0], 0, 275, 'groundSide', { progress: .28 }),
-        makePlayer(FIGHTERS[1], 1, 515, 'groundUp', { progress: .25 }),
-        makePlayer(FIGHTERS[2], 2, 755, 'groundDown', { face: -1, progress: .32 }),
-        makePlayer(FIGHTERS[3], 3, 995, 'specialNeutral', { face: -1, progress: .3 })
-      ];
-    }
+    players = built.players;
     return { fixture, players: players.length };
   };
   const requestedFixture = new URLSearchParams(location.search).get('visualFixture');

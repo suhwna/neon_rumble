@@ -9,6 +9,9 @@ function createStats(matches = 0) {
     actionsByFighter: Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, {}])),
     hitsByMove: {},
     hitsByFighter: Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, 0])),
+    kosByFighter: Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, 0])),
+    deathsByFighter: Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, 0])),
+    selfDestructsByFighter: Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, 0])),
     hits: 0,
     kos: 0,
     selfDestructs: 0,
@@ -33,6 +36,8 @@ function finalizeStats(stats) {
 function runCpuSoak(options = {}) {
   const seeds = options.seeds || [11, 29, 47];
   const ticks = options.ticks || 60 * 180;
+  const stocks = Math.max(1, Number(options.stocks) || 9);
+  const timeSeconds = Math.max(10, Number(options.timeSeconds) || Math.floor(ticks / 60) - 3);
   const validStageIds = new Set(STAGES.map(stage => stage.id));
   const requestedStages = options.stageIds || [options.stageId || DEFAULT_RULES.stageId];
   const stageIds = [...new Set(requestedStages)].filter(stageId => validStageIds.has(stageId));
@@ -58,7 +63,7 @@ function runCpuSoak(options = {}) {
       // The requested budget includes the three-second countdown, so the
       // active match expires within the audit loop instead of producing an
       // artificial "none" winner with three seconds left.
-      rules: { ...DEFAULT_RULES, mode: 'stock', stocks: 9, timeSeconds: Math.max(10, Math.floor(ticks / 60) - 3), items: false, hazards: false, stageId }
+      rules: { ...DEFAULT_RULES, mode: 'stock', stocks, timeSeconds, items: false, hazards: false, stageId }
     });
     let lastEventId = 0;
     for (let frame = 0; frame < ticks && world.phase !== 'ended'; frame++) {
@@ -89,9 +94,17 @@ function runCpuSoak(options = {}) {
           stageStats.ledges += 1;
         }
         else if (event.type === 'ko') {
+          const victim = world.players.find(player => player.i === event.player)?.characterId;
+          const killer = world.players.find(player => player.i === event.killer)?.characterId;
+          const selfDestruct = event.killer == null || event.killer === event.player;
           for (const stats of [aggregate, stageStats]) {
             stats.kos += 1;
-            if (event.killer == null || event.killer === event.player) stats.selfDestructs += 1;
+            if (victim) stats.deathsByFighter[victim] += 1;
+            if (killer && !selfDestruct) stats.kosByFighter[killer] += 1;
+            if (selfDestruct) {
+              stats.selfDestructs += 1;
+              if (victim) stats.selfDestructsByFighter[victim] += 1;
+            }
           }
         }
       }

@@ -30,3 +30,12 @@ test('CPU audit reports independent results for every requested stage', () => {
     assert.ok(report.byStage[stageId].hits > 0, `${stageId} produced no hits`);
   }
 });
+
+test('CPU audit can use the real three-stock ruleset for outcome statistics', () => {
+  const report = runCpuSoak({
+    seeds: [31], ticks: 60 * 120, stocks: 3, timeSeconds: 120, stageIds: ['neon-deck']
+  });
+  assert.equal(report.matches, 1);
+  assert.ok(Object.values(report.winners).reduce((sum, wins) => sum + wins, 0) === 1);
+  assert.ok(report.kos > 0);
+});

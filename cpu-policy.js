@@ -21,9 +21,38 @@ function blazeNeutralChargeFrames({ distance, targetRecovering }) {
   return 1;
 }
 
+function chooseCombatPlan({
+  fighterId, targetShielding, targetVulnerable, quietFrames,
+  projectileReady, distance, playerDamage, targetDamage
+}) {
+  if (targetShielding || targetVulnerable || quietFrames >= 54) return 'pressure';
+  if (playerDamage > targetDamage + 38) return 'bait';
+  if (projectileReady && distance > 145) return 'zone';
+  return 'pressure';
+}
+
+function fighterDefenseChance(baseChance, fighterId, damage, forcingInitiative = false) {
+  return forcingInitiative ? baseChance * .68 : baseChance;
+}
+
+function preferredCombatRange({ fighterId, plan, pressuring, projectileFighter }) {
+  if (pressuring) return 78;
+  if (plan === 'zone' && projectileFighter) return 165;
+  return 112;
+}
+
+function boltBoomerangWanted({ plan, tick, cooldownUntil, difficulty, roll }) {
+  if (plan !== 'zone' || tick < cooldownUntil) return false;
+  return roll < (difficulty === 'hard' ? .62 : .42);
+}
+
 module.exports = {
   CPU_PROFILES,
   blazeTargetPriorityBonus,
   blazeAirNeutralWanted,
-  blazeNeutralChargeFrames
+  blazeNeutralChargeFrames,
+  chooseCombatPlan,
+  fighterDefenseChance,
+  preferredCombatRange,
+  boltBoomerangWanted
 };

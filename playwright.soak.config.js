@@ -3,7 +3,12 @@ const { defineConfig, devices } = require('@playwright/test');
 module.exports = defineConfig({
   testDir: './test/soak',
   testMatch: '**/*.soak.js',
-  timeout: Math.max(90_000, Number(process.env.NEON_SOAK_MS || 180_000) + 45_000),
+  timeout: Math.max(
+    90_000,
+    Number(process.env.NEON_SOAK_MS || 0) + 45_000,
+    Number(process.env.NEON_NETWORK_SOAK_MS || 0) + 45_000,
+    Number(process.env.NEON_MULTI_ROOM_SOAK_MS || 120_000) + 45_000
+  ),
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,

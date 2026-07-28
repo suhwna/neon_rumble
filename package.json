@@ -1,6 +1,6 @@
 {
   "name": "neon-rumble-online",
-  "version": "1.1.0-beta.10",
+  "version": "1.1.0-beta.11",
   "private": true,
   "description": "Online 4-player browser platform brawler",
   "main": "server.js",

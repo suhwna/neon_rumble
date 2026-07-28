@@ -9,11 +9,11 @@ const PROFILES = [
   { latency: 160, packetLoss: 2 }
 ];
 
-async function openNetworkClient(browser, baseURL, index) {
+async function openNetworkClient(browser, baseURL, index, label = index + 1) {
   const context = await browser.newContext({ viewport: { width: 960, height: 540 } });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
-  const profile = PROFILES[index];
+  const profile = PROFILES[index % PROFILES.length];
   await cdp.send('Network.enable');
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false,
@@ -23,7 +23,7 @@ async function openNetworkClient(browser, baseURL, index) {
     packetLoss: profile.packetLoss
   });
   await page.goto(baseURL);
-  await page.locator('#nickname-input').fill(`SOAK-NET-${index + 1}`);
+  await page.locator('#nickname-input').fill(`SOAK-NET-${label}`);
   await page.waitForTimeout(800 + profile.latency * 2);
   if (await page.locator('#patch-notes').isVisible()) await page.locator('#patch-notes-close').click();
   return { context, page, cdp, profile, samples: [] };
@@ -96,6 +96,74 @@ test('four independently delayed browsers survive a long shared battle', async (
       expect(Math.max(...steady.map(sample => sample.correctionPeakPx))).toBeLessThanOrEqual(240);
       expect(Math.max(...steady.map(sample => sample.emergencyCorrections || 0))).toBeLessThanOrEqual(8);
       if (heaps.length > 3) expect(heapGrowth).toBeLessThan(64 * 1024 * 1024);
+    }
+  } finally {
+    for (const client of clients) await client.context.close().catch(() => {});
+  }
+});
+
+test('two independent four-player rooms remain isolated under simultaneous load', async ({ browser, baseURL }) => {
+  const duration = Math.max(30_000, Number(process.env.NEON_MULTI_ROOM_SOAK_MS || 120_000));
+  const clients = [];
+  const rooms = [[], []];
+  try {
+    for (let roomIndex = 0; roomIndex < rooms.length; roomIndex++) {
+      for (let playerIndex = 0; playerIndex < PROFILES.length; playerIndex++) {
+        const client = await openNetworkClient(
+          browser, baseURL, playerIndex, `${roomIndex + 1}-${playerIndex + 1}`
+        );
+        clients.push(client);
+        rooms[roomIndex].push(client);
+      }
+    }
+
+    for (const roomClients of rooms) {
+      const [host, ...guests] = roomClients;
+      await host.page.locator('#create-button').click();
+      await expect(host.page.locator('#waiting-room')).toBeVisible();
+      const roomCode = (await host.page.locator('#waiting-room-code').textContent()).trim();
+      for (const guest of guests) {
+        await guest.page.locator('#room-input').fill(roomCode);
+        await guest.page.locator('#join-button').click();
+        await expect(guest.page.locator('#waiting-room')).toBeVisible();
+      }
+      await expect(host.page.locator('#player-list .player-pill:not(.empty)')).toHaveCount(4);
+      for (const client of roomClients) await client.page.locator('#waiting-ready').click();
+      await expect(host.page.locator('#waiting-start')).toBeEnabled();
+      await host.page.locator('#waiting-start').click();
+    }
+
+    await Promise.all(clients.map(client => expect(client.page.locator('#game')).toBeVisible()));
+    await clients[0].page.waitForTimeout(3_200);
+    const startedAt = Date.now();
+    let cycle = 0;
+    while (Date.now() - startedAt < duration) {
+      await Promise.all(clients.map(async (client, index) => {
+        const direction = (cycle + index) % 2 ? 'ArrowLeft' : 'ArrowRight';
+        await client.page.keyboard.down(direction);
+        await client.page.waitForTimeout(90 + index % 4 * 20);
+        if ((cycle + index) % 3 === 0) await client.page.keyboard.press(index % 2 ? 'KeyX' : 'KeyZ');
+        if ((cycle + index) % 11 === 0) await client.page.keyboard.press('ArrowUp');
+        await client.page.keyboard.up(direction);
+      }));
+      await clients[0].page.waitForTimeout(2_000);
+      const batch = await Promise.all(clients.map(client => client.page.evaluate(() => ({
+        ...window.__NEON_METRICS__,
+        heap: performance.memory?.usedJSHeapSize || 0
+      }))));
+      batch.forEach((sample, index) => clients[index].samples.push(sample));
+      cycle += 1;
+    }
+
+    for (let index = 0; index < clients.length; index++) {
+      const steady = clients[index].samples.slice(2);
+      expect(steady.length, `multi-room client ${index + 1} samples`).toBeGreaterThanOrEqual(3);
+      expect(Math.min(...steady.map(sample => sample.players))).toBe(4);
+      expect(Math.max(...steady.map(sample => sample.players))).toBe(4);
+      expect(Math.min(...steady.map(sample => sample.fps))).toBeGreaterThanOrEqual(28);
+      expect(Math.min(...steady.map(sample => sample.snapshotHz))).toBeGreaterThanOrEqual(8);
+      expect(Math.max(...steady.map(sample => sample.inputAckMs))).toBeLessThan(3_000);
+      expect(Math.max(...steady.map(sample => sample.correctionPeakPx))).toBeLessThanOrEqual(260);
     }
   } finally {
     for (const client of clients) await client.context.close().catch(() => {});

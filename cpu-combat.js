@@ -47,17 +47,32 @@ function findIncomingThreat(world, player, target) {
     return approaching && Math.abs(dx) < 260 && Math.abs(player.y - entity.y) < 75;
   });
   if (projectile) return { kind: 'projectile', direction: Math.sign(projectile.x - player.x) || 1 };
-  if (!target?.action) return null;
-
-  const move = target.action.move || {};
-  const startup = target.action.startup ?? move.startup ?? 0;
-  const activeEnd = startup + (move.active || 0);
-  const threateningFrame = target.action.frame >= Math.max(0, startup - 4) && target.action.frame <= activeEnd;
-  const reach = (move.reachX || 70) + (player.width + target.width) / 2 + 20;
-  if (threateningFrame && Math.abs(target.x - player.x) <= reach && Math.abs(target.y - player.y) < (move.reachY || 75)) {
-    return { kind: 'attack', direction: Math.sign(target.x - player.x) || target.face || 1 };
-  }
-  return null;
+  const enemies = world.players.filter(other =>
+    other.i !== player.i && !other.eliminated && !other.respawn && other.action
+    && (!world.rules.teams || other.team !== player.team)
+  );
+  const imminent = enemies
+    .map(other => {
+      const move = other.action.move || {};
+      const startup = other.action.startup ?? move.startup ?? 0;
+      const activeEnd = startup + (move.active || 0);
+      const threateningFrame = other.action.frame >= Math.max(0, startup - 4)
+        && other.action.frame <= activeEnd;
+      const dx = other.x - player.x;
+      const dy = other.y - player.y;
+      const reach = (move.reachX || 70) + (player.width + other.width) / 2 + 20;
+      const threatening = threateningFrame && Math.abs(dx) <= reach
+        && Math.abs(dy) < (move.reachY || 75);
+      return threatening ? { other, distance: Math.hypot(dx, dy * .72) } : null;
+    })
+    .filter(Boolean)
+    .sort((first, second) => first.distance - second.distance || first.other.i - second.other.i)[0];
+  if (!imminent) return null;
+  return {
+    kind: 'attack',
+    direction: Math.sign(imminent.other.x - player.x) || imminent.other.face || 1,
+    attacker: imminent.other.i
+  };
 }
 
 module.exports = { selectCpuTarget, findIncomingThreat };
