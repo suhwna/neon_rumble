@@ -1098,12 +1098,18 @@ function draw(dt) {
   else effectQuality = Math.min(1, effectQuality + dt * .55);
   if (!visualFixtureActive) updateCamera(dt);
   ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = '#080a12'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  const assetBackgroundDrawn = window.NEON_ART?.drawStageBackground(ctx, stage, {
+    x: 0,
+    y: 0,
+    width: canvas.width,
+    height: canvas.height
+  }) || false;
   ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,viewOffsetX*dpr,viewOffsetY*dpr);
   const shakeX = (Math.random() - .5) * screenShake, shakeY = (Math.random() - .5) * screenShake;
   ctx.translate(WORLD_W / 2 + shakeX, WORLD_H / 2 + shakeY);
   ctx.scale(camera.zoom + cameraPunch, camera.zoom + cameraPunch);
   ctx.translate(-camera.x, -camera.y);
-  drawBackground(); drawBlastZone(); drawPlatforms(); drawEntities(); drawRespawnPlatforms();
+  drawBackground(assetBackgroundDrawn); drawBlastZone(); drawPlatforms(); drawEntities(); drawRespawnPlatforms();
   drawTrails();
   drawDashAfterimages();
   for (const player of window.NEON_READABILITY.layerOrder(players, myIndex)) drawPlayer(player, dt);
@@ -1189,9 +1195,9 @@ function paintBackground(target, stageDefinition) {
   for (let x = -200; x <= 1480; x += 80) { ctx.beginPath(); ctx.moveTo(640, horizon); ctx.lineTo(x, 760); ctx.stroke(); }
   ctx.fillStyle = 'rgba(255,255,255,.014)'; for (let y = -100; y < 820; y += 6) ctx.fillRect(-240, y, 1760, 1);
 }
-function drawBackground() {
+function drawBackground(assetBackgroundDrawn = false) {
+  if (assetBackgroundDrawn) return;
   const bounds = { x: -430, y: -330, width: WORLD_W + 860, height: WORLD_H + 620 };
-  if (window.NEON_ART?.drawStageBackground(ctx, stage, bounds)) return;
   if (!backgroundCache || backgroundCacheStage !== stage.id) {
     const left = bounds.x, top = bounds.y, width = bounds.width, height = bounds.height;
     const texture = document.createElement('canvas');
@@ -3258,12 +3264,10 @@ function drawPlayer(p, dt) {
   ctx.shadowBlur=hitFlash?8:0;ctx.shadowColor=renderColor;ctx.lineCap='round';
   ctx.strokeStyle='#080d19';ctx.lineWidth=10;ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=5;ctx.stroke();ctx.shadowBlur=0;
-  const assetHeadDrawn = fighter.id === 'volt' && window.NEON_ART?.drawPart(ctx, 'volt.head', {
+  const assetHeadDrawn = window.NEON_ART?.drawPart(ctx, `${fighter.id}.head`, {
     x: 0,
     y: headY - 3,
     face: p.face,
-    width: 49,
-    height: 49,
     filter: fullBodyFlash
       ? 'brightness(2.25) saturate(.15)'
       : hitFlash

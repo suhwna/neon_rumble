@@ -9,6 +9,18 @@
       "role": "non-collidable stage backdrop",
       "fallback": "procedural Canvas background"
     },
+    "sky-rail.background": {
+      "file": "sky-rail/background.png",
+      "sourceSize": [1279, 720],
+      "role": "non-collidable stage backdrop",
+      "fallback": "procedural Canvas background"
+    },
+    "reactor-core.background": {
+      "file": "reactor-core/background.png",
+      "sourceSize": [1279, 720],
+      "role": "non-collidable stage backdrop",
+      "fallback": "procedural Canvas background"
+    },
     "volt.head": {
       "file": "fighters/volt/head.png",
       "sourceSize": [384, 384],
@@ -16,6 +28,30 @@
       "anchor": [0.5, 0.52],
       "displaySize": [49, 49],
       "fallback": "procedural VOLT head"
+    },
+    "blaze.head": {
+      "file": "fighters/blaze/head.png",
+      "sourceSize": [384, 384],
+      "role": "mirrorable head attached to the existing Canvas joint rig",
+      "anchor": [0.5, 0.52],
+      "displaySize": [52, 52],
+      "fallback": "procedural BLAZE head"
+    },
+    "bolt.head": {
+      "file": "fighters/bolt/head.png",
+      "sourceSize": [384, 384],
+      "role": "mirrorable head attached to the existing Canvas joint rig",
+      "anchor": [0.5, 0.52],
+      "displaySize": [47, 47],
+      "fallback": "procedural BOLT head"
+    },
+    "nova.head": {
+      "file": "fighters/nova/head.png",
+      "sourceSize": [384, 384],
+      "role": "mirrorable head attached to the existing Canvas joint rig",
+      "anchor": [0.5, 0.52],
+      "displaySize": [50, 50],
+      "fallback": "procedural NOVA head"
     }
   }
 }

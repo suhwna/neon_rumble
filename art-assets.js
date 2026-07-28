@@ -6,6 +6,14 @@
       'neon-deck': Object.freeze({
         background: '/assets/prototype/neon-deck/background.png',
         opacity: 0.9
+      }),
+      'sky-rail': Object.freeze({
+        background: '/assets/prototype/sky-rail/background.png',
+        opacity: 0.9
+      }),
+      'reactor-core': Object.freeze({
+        background: '/assets/prototype/reactor-core/background.png',
+        opacity: 0.9
       })
     }),
     parts: Object.freeze({
@@ -15,6 +23,27 @@
         anchorY: 0.52,
         width: 49,
         height: 49
+      }),
+      'blaze.head': Object.freeze({
+        src: '/assets/prototype/fighters/blaze/head.png',
+        anchorX: 0.5,
+        anchorY: 0.52,
+        width: 52,
+        height: 52
+      }),
+      'bolt.head': Object.freeze({
+        src: '/assets/prototype/fighters/bolt/head.png',
+        anchorX: 0.5,
+        anchorY: 0.52,
+        width: 47,
+        height: 47
+      }),
+      'nova.head': Object.freeze({
+        src: '/assets/prototype/fighters/nova/head.png',
+        anchorX: 0.5,
+        anchorY: 0.52,
+        width: 50,
+        height: 50
       })
     })
   });

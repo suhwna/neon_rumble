@@ -41,8 +41,13 @@ test('hybrid art assets preload and draw while preserving explicit fallbacks', (
   assert.equal(art.MANIFEST.mode, 'hybrid-canvas');
   assert.equal(art.isEnabled(), true);
   assert.equal(art.drawStageBackground(ctx, { id: 'neon-deck' }, { x: 0, y: 0, width: 1280, height: 720 }), true);
-  assert.equal(art.drawStageBackground(ctx, { id: 'sky-rail' }, { x: 0, y: 0, width: 1280, height: 720 }), false);
+  assert.equal(art.drawStageBackground(ctx, { id: 'sky-rail' }, { x: 0, y: 0, width: 1280, height: 720 }), true);
+  assert.equal(art.drawStageBackground(ctx, { id: 'reactor-core' }, { x: 0, y: 0, width: 1280, height: 720 }), true);
+  assert.equal(art.drawStageBackground(ctx, { id: 'missing-stage' }, { x: 0, y: 0, width: 1280, height: 720 }), false);
   assert.equal(art.drawPart(ctx, 'volt.head', { x: 10, y: 20, face: -1 }), true);
+  assert.equal(art.drawPart(ctx, 'blaze.head', { x: 10, y: 20, face: 1 }), true);
+  assert.equal(art.drawPart(ctx, 'bolt.head', { x: 10, y: 20, face: 1 }), true);
+  assert.equal(art.drawPart(ctx, 'nova.head', { x: 10, y: 20, face: 1 }), true);
   assert.equal(art.drawPart(ctx, 'missing.part', {}), false);
   assert.ok(calls.some(call => call[0] === 'drawImage'));
   assert.ok(calls.some(call => call[0] === 'scale' && call[1] === -1));
