@@ -1683,14 +1683,14 @@ const ATTACK_KEYFRAMES = Object.freeze({
     recovery: [{ t: 0, bodyX: -3, rotation: .17, frontHandX: 27, frontHandY: -4, backHandX: 30, backHandY: 8, backFootX: -58, backFootLift: 19 }, { t: 1, bodyX: 0, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airNeutral: {
-    startup: [{ t: 0 }, { t: 1, bodyY: -2, rotation: .04, scaleX: .88, scaleY: 1.1, frontHandX: 16, frontHandY: -16, backHandX: -15, backHandY: -12, frontFootX: 9, frontFootLift: 13, backFootX: -8, backFootLift: 15 }],
-    active: [{ t: 0, bodyY: -2, rotation: .04, scaleX: .88, scaleY: 1.1 }, { t: .35, bodyY: 2, rotation: -.05, scaleX: 1.18, scaleY: .84, frontHandX: 31, frontHandY: -7, backHandX: -29, backHandY: -4, frontFootX: 47, frontFootLift: 4, backFootX: -45, backFootLift: 20 }, { t: 1, bodyY: 1, rotation: -.03, scaleX: 1.1, scaleY: .9, frontHandX: 28, frontHandY: -6, backHandX: -26, backHandY: -3, frontFootX: 39, backFootX: -37 }],
-    recovery: [{ t: 0, bodyY: 1, rotation: -.03, scaleX: 1.1, scaleY: .9, frontHandX: 28, frontHandY: -6, backHandX: -26, backHandY: -3, frontFootX: 39, backFootX: -37 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [{ t: 0 }, { t: 1, bodyY: -4, rotation: .09, scaleX: .88, scaleY: 1.08, frontHandX: 11, frontHandY: -17, backHandX: -20, backHandY: 1, frontFootX: 7, frontFootLift: 17, backFootX: -13, backFootLift: 20 }],
+    active: [{ t: 0, bodyY: -4, rotation: .09, scaleX: .88, scaleY: 1.08 }, { t: .35, bodyY: 1, rotation: -.12, scaleX: 1.08, scaleY: .9, frontHandX: 36, frontHandY: -15, backHandX: -22, backHandY: 8, frontFootX: 48, frontFootLift: 5, backFootX: -22, backFootLift: 18 }, { t: 1, bodyY: 0, rotation: -.07, scaleX: 1.04, scaleY: .94, frontHandX: 31, frontHandY: -12, backHandX: -20, backHandY: 5, frontFootX: 40, frontFootLift: 7, backFootX: -18, backFootLift: 16 }],
+    recovery: [{ t: 0, bodyY: 0, rotation: -.07, scaleX: 1.04, scaleY: .94, frontHandX: 31, frontHandY: -12, backHandX: -20, backHandY: 5, frontFootX: 40, frontFootLift: 7, backFootX: -18, backFootLift: 16 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airDown: {
-    startup: [{ t: 0 }, { t: 1, bodyY: -5, rotation: -.03, scaleX: .9, scaleY: 1.1, frontHandX: 28, frontHandY: -14, backHandX: -26, backHandY: -12, frontFootX: 8, frontFootLift: 14, backFootX: -8, backFootLift: 12 }],
-    active: [{ t: 0, bodyY: -5, rotation: -.03, frontHandX: 28, frontHandY: -14, backHandX: -26, backHandY: -12 }, { t: .3, bodyY: 7, rotation: .035, scaleX: 1.08, scaleY: 1.16, frontHandX: 31, frontHandY: -5, backHandX: -30, backHandY: -4, frontFootX: 8, frontFootLift: -28, backFootX: -8, backFootLift: -24 }, { t: 1, bodyY: 5, rotation: .02, frontHandX: 29, frontHandY: -4, backHandX: -28, backHandY: -3, frontFootLift: -22, backFootLift: -20 }],
-    recovery: [{ t: 0, bodyY: 5, rotation: .02, frontHandX: 29, frontHandY: -4, backHandX: -28, backHandY: -3, frontFootLift: -22, backFootLift: -20 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [{ t: 0 }, { t: 1, bodyY: -6, rotation: -.12, scaleX: .91, scaleY: 1.08, frontHandX: 21, frontHandY: -25, backHandX: -20, backHandY: -18, frontFootX: 5, frontFootLift: 17, backFootX: -15, backFootLift: 9 }],
+    active: [{ t: 0, bodyY: -6, rotation: -.12, frontHandX: 21, frontHandY: -25, backHandX: -20, backHandY: -18 }, { t: .3, bodyY: 4, rotation: .08, scaleX: .94, scaleY: 1.22, frontHandX: 17, frontHandY: -23, backHandX: -22, backHandY: -16, frontFootX: 5, frontFootLift: -31, backFootX: -15, backFootLift: -9 }, { t: 1, bodyY: 3, rotation: .055, scaleX: .96, scaleY: 1.14, frontHandX: 19, frontHandY: -19, backHandX: -21, backHandY: -13, frontFootX: 6, frontFootLift: -25, backFootX: -14, backFootLift: -7 }],
+    recovery: [{ t: 0, bodyY: 3, rotation: .055, scaleX: .96, scaleY: 1.14, frontHandX: 19, frontHandY: -19, backHandX: -21, backHandY: -13, frontFootX: 6, frontFootLift: -25, backFootX: -14, backFootLift: -7 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   cast: {
     startup: [{ t: 0 }, { t: 1, bodyX: -11, bodyY: 3, rotation: .18, scaleX: 1.14, scaleY: .88, frontHandX: -10, frontHandY: -13, backHandX: -21, backHandY: 9, frontFootX: 20, backFootX: -23 }],
@@ -1703,9 +1703,9 @@ const ATTACK_KEYFRAMES = Object.freeze({
     recovery: [{ t: 0, bodyX: 18, bodyY: 4, rotation: -.24, scaleX: 1.22, scaleY: .82, frontHandX: 26, frontHandY: -4, backHandX: -33, backHandY: 6, frontFootX: 4, backFootX: -28 }, { t: 1, bodyX: 0, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
   rise: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -2, bodyY: 9, rotation: .035, scaleX: 1.18, scaleY: .8, frontHandX: -5, frontHandY: 7, backHandX: -16, backHandY: 6, frontFootX: 19, backFootX: -20 }],
-    active: [{ t: 0, bodyX: -2, bodyY: 9, rotation: .035, frontHandX: -5, frontHandY: 7, backHandX: -16, backHandY: 6 }, { t: .25, bodyX: 3, bodyY: -20, rotation: -.06, scaleX: .72, scaleY: 1.42, frontHandX: 12, frontHandY: -62, backHandX: -14, backHandY: -34, frontFootX: 8, frontFootLift: 14, backFootX: -7, backFootLift: 18 }, { t: 1, bodyX: 2, bodyY: -13, rotation: -.035, scaleX: .82, scaleY: 1.28, frontHandX: 13, frontHandY: -53, backHandX: -16, backHandY: -29, frontFootX: 10, frontFootLift: 10, backFootX: -9, backFootLift: 14 }],
-    recovery: [{ t: 0, bodyX: 2, bodyY: -13, rotation: -.035, scaleX: .82, scaleY: 1.28, frontHandX: 13, frontHandY: -53, backHandX: -16, backHandY: -29, frontFootX: 10, frontFootLift: 10, backFootX: -9, backFootLift: 14 }, { t: 1, bodyX: 0, bodyY: -1, rotation: .01, scaleX: 1, scaleY: 1, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [{ t: 0 }, { t: 1, bodyX: -3, bodyY: 8, rotation: .08, scaleX: 1.16, scaleY: .82, frontHandX: -7, frontHandY: 5, backHandX: -20, backHandY: 8, frontFootX: 22, frontFootLift: 2, backFootX: -18, backFootLift: 9 }],
+    active: [{ t: 0, bodyX: -3, bodyY: 8, rotation: .08, frontHandX: -7, frontHandY: 5, backHandX: -20, backHandY: 8 }, { t: .25, bodyX: 4, bodyY: -18, rotation: -.09, scaleX: .82, scaleY: 1.26, frontHandX: 14, frontHandY: -55, backHandX: -20, backHandY: -24, frontFootX: 13, frontFootLift: 17, backFootX: -15, backFootLift: 26 }, { t: 1, bodyX: 3, bodyY: -12, rotation: -.045, scaleX: .88, scaleY: 1.18, frontHandX: 15, frontHandY: -47, backHandX: -19, backHandY: -20, frontFootX: 14, frontFootLift: 13, backFootX: -15, backFootLift: 21 }],
+    recovery: [{ t: 0, bodyX: 3, bodyY: -12, rotation: -.045, scaleX: .88, scaleY: 1.18, frontHandX: 15, frontHandY: -47, backHandX: -19, backHandY: -20, frontFootX: 14, frontFootLift: 13, backFootX: -15, backFootLift: 21 }, { t: 1, bodyX: 0, bodyY: -1, rotation: .01, scaleX: 1, scaleY: 1, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   counterGuard: {
     startup: [
@@ -1906,6 +1906,12 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.frontHandY -= 9 * phaseWeight; styled.backHandY -= 5 * phaseWeight; styled.scaleY *= 1 + .06 * phaseWeight;
     } else if (action === 'airNeutral') {
       styled.frontFootX += 7 * active; styled.backFootX -= 7 * active; styled.rotation += .12 * active;
+    } else if (action === 'specialUp') {
+      styled.frontHandX += 8 * active;
+      styled.frontHandY -= 9 * phaseWeight;
+      styled.backHandX -= 7 * active;
+      styled.frontFootLift += 5 * active;
+      styled.rotation -= .08 * active;
     }
   } else if (player.characterId === 'blaze') {
     styled.bodyX += -7 * windup + 10 * active;
@@ -1925,6 +1931,13 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.frontFootX += 8 * active; styled.backFootX -= 8 * active;
     } else if (action === 'airDown') {
       styled.frontHandX += 5 * phaseWeight; styled.backHandX -= 5 * phaseWeight; styled.scaleY *= 1 + .1 * active;
+    } else if (action === 'specialUp') {
+      styled.frontHandY += 18 * active;
+      styled.backHandY += 13 * active;
+      styled.frontFootLift += 10 * active;
+      styled.backFootLift += 8 * active;
+      styled.scaleX *= 1 + .12 * active;
+      styled.scaleY *= 1 - .12 * active;
     }
   } else if (player.characterId === 'bolt') {
     const twist = phase === 'active' ? Math.sin(t * Math.PI) : windup * -.5;
@@ -1944,6 +1957,14 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
     }
     if (action === 'groundDown' || action === 'specialDown') {
       styled.bodyY += 5 * active; styled.frontFootX += 7 * active; styled.backFootX -= 7 * active;
+    } else if (action === 'specialUp') {
+      styled.rotation += .22 * active;
+      styled.frontHandY += 9 * active;
+      styled.backHandY -= 4 * active;
+      styled.frontFootLift += 13 * active;
+      styled.backFootLift += 15 * active;
+      styled.scaleX *= 1 + .08 * active;
+      styled.scaleY *= 1 - .08 * active;
     }
   } else if (player.characterId === 'nova') {
     styled.bodyX += -3 * windup + 5 * active;
@@ -1960,6 +1981,12 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.frontHandX += 10 * active; styled.backHandX -= 8 * active; styled.frontFootLift += 5 * active;
     } else if (action === 'groundUp' || action === 'airUp' || motion === 'warp') {
       styled.frontHandY -= 12 * phaseWeight; styled.backHandY -= 8 * phaseWeight; styled.frontFootX += 3 * active; styled.backFootX -= 3 * active;
+      if (action === 'specialUp') {
+        styled.frontHandX += 10 * active;
+        styled.backHandX -= 12 * active;
+        styled.backFootLift += 10 * active;
+        styled.rotation -= .12 * active;
+      }
     } else if (action === 'airDown') {
       styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.scaleX *= 1 + .08 * active;
     } else if (motion === 'gravity') {
@@ -2018,7 +2045,8 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
         : progress;
       const authoredPose = fighterAttackPose(player, sampleKeyframes(frames, poseProgress), action, motion, phase, poseProgress);
       const spinning = ['wheelSpin', 'voltSpin', 'ironSpin', 'starOrbit', 'backRoll', 'roll'].includes(motion);
-      return window.NEON_MOTION_CONSTRAINTS?.constrainPose(authoredPose, { spinning }) || authoredPose;
+      const aerial = action.startsWith('air') || action === 'specialUp';
+      return window.NEON_MOTION_CONSTRAINTS?.constrainPose(authoredPose, { spinning, aerial }) || authoredPose;
     }
   }
   const statePose = (frames, value) => fighterStatePose(player, sampleKeyframes(frames, value), action, value, age);
@@ -3463,51 +3491,11 @@ function drawKoCinematics(){
   }
 }
 function burst(x,y,color,count,speed,direction=0,scale=1){const densityScale=particles.length>48?.36:particles.length>30?.64:1,drawCount=Math.max(2,Math.ceil(count*effectQuality*densityScale));for(let i=0;i<drawCount;i++){const forward=i<drawCount*.66,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?1.8:2.55),s=speed*(.3+Math.random()*.82),duration=.19+Math.random()*.15;particles.push({x:x+(Math.random()-.5)*7,y:y+(Math.random()-.5)*7,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%4===0?color:'#ffffff',size:(1.8+Math.random()*2.5)*scale,gravity:42+Math.random()*65});}if(particles.length>64)particles.splice(0,particles.length-64);}
-function drawParticles(){ctx.save();for(const p of particles){const fade=clamp(p.life/p.duration,0,1),size=Math.max(1.6,p.size*(.48+fade*.52));ctx.globalAlpha=Math.min(1,fade*fade*1.12);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(Math.round(p.x),Math.round(p.y),size*.52,0,Math.PI*2);ctx.fill();}ctx.restore();}
-function drawBlastMarks(){for(const mark of blastMarks){const fade=clamp(mark.life/mark.duration,0,1),expand=.72+(1-fade)*.28;ctx.save();ctx.translate(mark.x,mark.y);ctx.globalAlpha=fade*.28;ctx.fillStyle=mark.color;ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.shadowColor=mark.color;ctx.shadowBlur=10;ctx.beginPath();for(let i=0;i<16;i++){const a=-Math.PI/2+i*Math.PI/8,r=mark.radius*expand*(i%2?.84:1);i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fill();ctx.globalAlpha=fade*.8;ctx.stroke();ctx.restore();}}
-function drawShieldBreakEffects(){
-  for(const effect of shieldBreakEffects){
-    const progress=1-clamp(effect.life/effect.duration,0,1);
-    const collapse=clamp(progress/.18,0,1);
-    const burstProgress=clamp((progress-.1)/.9,0,1);
-    const fade=1-burstProgress;
-    const shellRadius=lerp(effect.radius,effect.radius*.36,collapse);
-    ctx.save();ctx.translate(effect.x,effect.y);ctx.globalCompositeOperation='lighter';
-    ctx.shadowColor=effect.color;ctx.shadowBlur=effectQuality<.78?0:6;
-    if(progress<.3){
-      const shellFade=1-clamp((progress-.14)/.16,0,1);
-      ctx.globalAlpha=.78*shellFade;ctx.strokeStyle='#ffffff';ctx.lineWidth=4+collapse*2;
-      for(let segment=0;segment<6;segment++){
-        const start=-Math.PI/2+segment*Math.PI/3+.08;
-        ctx.beginPath();ctx.arc(0,0,shellRadius,start,start+Math.PI*.22);ctx.stroke();
-      }
-      ctx.globalAlpha=.38*shellFade;ctx.strokeStyle=effect.color;ctx.lineWidth=7;
-      ctx.beginPath();ctx.arc(0,0,shellRadius,0,Math.PI*2);ctx.stroke();
-    }
-    if(progress>=.08){
-      const expansion=effect.radius*(.42+burstProgress*1.08);
-      const shardCount=effectQuality<.78?6:8;
-      for(let shard=0;shard<shardCount;shard++){
-        const angle=-Math.PI/2+shard*Math.PI*2/shardCount+(shard%2?.08:-.06);
-        const distance=expansion*(.72+(shard%3)*.1);
-        const x=Math.cos(angle)*distance,y=Math.sin(angle)*distance;
-        const length=(11+(shard%3)*4)*(1-burstProgress*.35);
-        const width=3.2+(shard%2)*1.5;
-        ctx.save();ctx.translate(x,y);ctx.rotate(angle+burstProgress*(shard%2?.55:-.55));
-        ctx.globalAlpha=fade*(shard%4===0?.92:.62);ctx.fillStyle=shard%4===0?'#ffffff':effect.color;
-        ctx.beginPath();ctx.moveTo(length*.62,0);ctx.lineTo(0,width);ctx.lineTo(-length*.62,0);ctx.lineTo(0,-width);ctx.closePath();ctx.fill();ctx.restore();
-      }
-      const flash=1-clamp(burstProgress/.34,0,1);
-      if(flash>0){
-        ctx.globalAlpha=flash*.9;ctx.fillStyle='#ffffff';
-        const size=12+burstProgress*23;ctx.beginPath();ctx.moveTo(size,0);ctx.lineTo(0,size*.55);ctx.lineTo(-size,0);ctx.lineTo(0,-size*.55);ctx.closePath();ctx.fill();
-      }
-    }
-    ctx.restore();
-  }
-}
-function drawImpactRings(){for(const ring of impactRings){const fade=clamp(ring.life/ring.duration,0,1),burst=1-fade,radius=ring.radius*(.62+burst*.9);ctx.save();ctx.translate(ring.x,ring.y);ctx.globalAlpha=fade*.8;ctx.strokeStyle=ring.color;ctx.lineWidth=2.5+fade*4;ctx.shadowBlur=effectQuality<.78?0:4;ctx.shadowColor=ring.color;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.stroke();if(effectQuality>=.68){ctx.globalAlpha*=.35;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,radius*.58,0,Math.PI*2);ctx.stroke();}ctx.restore();}}
-function drawTrails(){for(const trail of trails){if(!trail.launch)continue;ctx.save();ctx.translate(trail.x,trail.y);const speed=Math.hypot(trail.vx,trail.vy),length=clamp(speed*(trail.finisher?.19:.14),58,trail.finisher?178:132);ctx.rotate(Math.atan2(trail.vy,trail.vx));const gradient=ctx.createLinearGradient(-length,0,4,0);gradient.addColorStop(0,'rgba(255,255,255,0)');gradient.addColorStop(trail.finisher?.55:.72,trail.color);gradient.addColorStop(1,'rgba(255,255,255,.9)');ctx.globalAlpha=trail.life*(trail.finisher?2.8:2.25);ctx.strokeStyle=gradient;ctx.lineWidth=clamp(speed/(trail.finisher?125:155),trail.finisher?5:3,trail.finisher?9:6);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-length,0);ctx.lineTo(4,0);ctx.stroke();if(trail.finisher){ctx.globalAlpha*=.75;ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-length*.72,0);ctx.lineTo(5,0);ctx.stroke();}ctx.restore();}}
+function drawParticles(){window.NEON_RENDER_EFFECTS.particles(ctx,particles);}
+function drawBlastMarks(){window.NEON_RENDER_EFFECTS.blastMarks(ctx,blastMarks);}
+function drawShieldBreakEffects(){window.NEON_RENDER_EFFECTS.shieldBreaks(ctx,shieldBreakEffects,effectQuality);}
+function drawImpactRings(){window.NEON_RENDER_EFFECTS.impactRings(ctx,impactRings,effectQuality);}
+function drawTrails(){window.NEON_RENDER_EFFECTS.launchTrails(ctx,trails);}
 function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of shieldBreakEffects)effect.life-=dt;shieldBreakEffects=shieldBreakEffects.filter(effect=>effect.life>0);for(const image of dashAfterimages)image.life-=dt;dashAfterimages=dashAfterimages.filter(image=>image.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
 
 function loop(now){
@@ -3646,7 +3634,7 @@ if (new URLSearchParams(location.search).get('visualTest') === '1') {
     const motionAudit = /^motion:([A-Za-z0-9]+):(startup|active|recovery)$/.exec(fixture);
     const makePlayer = (fighter, index, x, action, options = {}) => {
       const move = fighter.moves[action] || {};
-      const y = 500 - fighter.height / 2, direction = options.face || 1;
+      const y = (options.floorY ?? 500) - fighter.height / 2, direction = options.face || 1;
       const strikePoints = action === 'groundHit' || move.projectileOnly || move.trapOnly
         ? []
         : action.includes('Up')
@@ -3659,7 +3647,7 @@ if (new URLSearchParams(location.search).get('visualTest') === '1') {
         characterId: fighter.id, palette: index, team: null,
         x, y, vx: options.vx || 0, vy: options.vy || 0,
         face: direction, width: fighter.width, height: fighter.height,
-        grounded: true, platformId: 'main', jumps: 2, damage: 35 + index * 17,
+        grounded: options.grounded ?? true, platformId: options.grounded === false ? null : 'main', jumps: 2, damage: 35 + index * 17,
         stocks: 3, score: 0, shield: SHIELD_MAX, shielding: false, invincible: 0,
         eliminated: false, respawn: 0, respawnPlatformFrames: 0,
         actionName: action, actionPhase: options.phase ?? (action === 'groundHit' ? null : 'active'),
@@ -3691,6 +3679,8 @@ if (new URLSearchParams(location.search).get('visualTest') === '1') {
       const positions = [275, 515, 755, 995];
       players = FIGHTERS.map((fighter, index) => makePlayer(fighter, index, positions[index], action, {
         face: index < 2 ? 1 : -1,
+        grounded: !action.startsWith('air'),
+        floorY: action.startsWith('air') ? 420 : 500,
         phase,
         progress: phase === 'startup' ? .72 : phase === 'active' ? .28 : .35,
         variant: action.startsWith('ground') && action !== 'groundNeutral' ? 'tilt' : null
@@ -3712,5 +3702,7 @@ if (new URLSearchParams(location.search).get('visualTest') === '1') {
     }
     return { fixture, players: players.length };
   };
+  const requestedFixture = new URLSearchParams(location.search).get('visualFixture');
+  if (requestedFixture) window.__NEON_SET_VISUAL_FIXTURE__(requestedFixture);
 }
 function escapeHtml(value){return String(value).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));}

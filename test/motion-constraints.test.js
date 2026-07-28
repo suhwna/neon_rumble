@@ -23,3 +23,12 @@ test('authored attack poses remain inside readable humanoid bounds', () => {
 test('intentional spin actions preserve full rotation', () => {
   assert.equal(constrainPose({ rotation: Math.PI * 2 }, { spinning: true }).rotation, Math.PI * 2);
 });
+
+test('aerial attacks may extend a foot below the neutral body line', () => {
+  const pose = constrainPose({
+    frontFootLift: -28,
+    backFootLift: -60
+  }, { aerial: true });
+  assert.equal(pose.frontFootLift, -28);
+  assert.equal(pose.backFootLift, -34);
+});

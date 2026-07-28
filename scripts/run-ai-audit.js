@@ -2,7 +2,8 @@ const { runCpuSoak } = require('../simulation-audit');
 
 const report = runCpuSoak({
   seeds: [11, 17, 23, 29, 37, 43, 47, 59, 67, 71, 83, 97],
-  ticks: 60 * 300
+  ticks: 60 * 300,
+  stageIds: ['neon-deck', 'sky-rail', 'reactor-core']
 });
 
 const moveTotal = Object.values(report.actions).reduce((sum, count) => sum + count, 0);
@@ -24,5 +25,15 @@ console.log(JSON.stringify({
   topMoves,
   hitsByMove: report.hitsByMove,
   hitsByFighter: report.hitsByFighter,
-  actionsByFighter: report.actionsByFighter
+  actionsByFighter: report.actionsByFighter,
+  byStage: Object.fromEntries(Object.entries(report.byStage).map(([stageId, stats]) => [stageId, {
+    simulatedMinutes: +(stats.ticks / 3600).toFixed(1),
+    winners: stats.winners,
+    hits: stats.hits,
+    hitsByFighter: stats.hitsByFighter,
+    kos: stats.kos,
+    selfDestructRate: `${(stats.selfDestructRate * 100).toFixed(1)}%`,
+    ledgeGrabs: stats.ledges,
+    recoverySpecials: stats.recoveries
+  }]))
 }, null, 2));

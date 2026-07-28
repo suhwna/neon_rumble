@@ -3,6 +3,7 @@
 
   function constrainPose(pose, options = {}) {
     const spinning = options.spinning === true;
+    const footLiftMin = options.aerial === true ? -34 : 0;
     return {
       ...pose,
       bodyX: clamp(pose.bodyX, -27, 27),
@@ -16,8 +17,8 @@
       backHandY: clamp(pose.backHandY, -58, 48),
       frontFootX: clamp(pose.frontFootX, -57, 57),
       backFootX: clamp(pose.backFootX, -57, 57),
-      frontFootLift: clamp(pose.frontFootLift, 0, 34),
-      backFootLift: clamp(pose.backFootLift, 0, 34)
+      frontFootLift: clamp(pose.frontFootLift, footLiftMin, 34),
+      backFootLift: clamp(pose.backFootLift, footLiftMin, 34)
     };
   }
 

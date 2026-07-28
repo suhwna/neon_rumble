@@ -18,3 +18,15 @@ test('four hard CPUs sustain a varied three-minute brawl without frequent self-d
   assert.ok(categories.has('grab'));
   assert.ok(report.selfDestructRate <= 0.22, `self-destruct rate ${report.selfDestructRate}`);
 });
+
+test('CPU audit reports independent results for every requested stage', () => {
+  const stageIds = ['neon-deck', 'sky-rail', 'reactor-core'];
+  const report = runCpuSoak({ seeds: [23], ticks: 60 * 45, stageIds });
+  assert.equal(report.matches, 3);
+  assert.deepEqual(Object.keys(report.byStage), stageIds);
+  for (const stageId of stageIds) {
+    assert.equal(report.byStage[stageId].matches, 1);
+    assert.ok(report.byStage[stageId].ticks > 0);
+    assert.ok(report.byStage[stageId].hits > 0, `${stageId} produced no hits`);
+  }
+});

@@ -1,11 +1,11 @@
 const { BUTTONS, FIGHTERS, STAGES, ITEMS, DEFAULT_RULES } = require('./content');
 const {
   CPU_PROFILES,
-  blazeTargetPriorityBonus,
   blazeAirNeutralWanted,
   blazeNeutralChargeFrames
 } = require('./cpu-policy');
 const { selectRecoveryTarget, isOffstage } = require('./cpu-navigation');
+const { selectCpuTarget, findIncomingThreat } = require('./cpu-combat');
 
 const TICK_RATE = 60;
 const WORLD_W = 1280;
@@ -2479,66 +2479,6 @@ function cpuBrain(world, player) {
   return world.cpuBrains.get(player.i);
 }
 
-function cpuTarget(world, player, brain) {
-  const candidates = world.players.filter(other =>
-    other.i !== player.i && !other.eliminated && !other.respawn
-    && (!world.rules.teams || other.team !== player.team)
-  );
-  if (!candidates.length) return null;
-
-  const locked = candidates.find(other => other.i === brain?.targetId);
-  if (locked && world.tick < (brain.targetLockUntil || 0)) return locked;
-
-  // In a free-for-all, pure nearest-target selection causes every CPU to pile
-  // onto the slowest/largest fighter. Respect short target commitments and
-  // spread fresh choices across enemies that are not already being pressured.
-  const focusedBy = new Map();
-  if (!world.rules.teams && candidates.length >= 2) {
-    for (const [index, otherBrain] of world.cpuBrains || []) {
-      if (index === player.i || otherBrain.targetId == null || world.tick >= (otherBrain.targetLockUntil || 0)) continue;
-      focusedBy.set(otherBrain.targetId, (focusedBy.get(otherBrain.targetId) || 0) + 1);
-    }
-  }
-  const selected = candidates
-    .map(other => {
-      const distance = Math.hypot(other.x - player.x, (other.y - player.y) * .72);
-      const threat = other.action ? 55 : 0;
-      const vulnerable = other.stun > 0 || other.landingLag > 0 ? 18 : 0;
-      const retaliation = player.comboTimer > 0 && player.comboAttacker === other.i ? 72 : 0;
-      const crowdFocus = (focusedBy.get(other.i) || 0) * 135;
-      const finisherPriority = player.characterId === 'blaze' ? blazeTargetPriorityBonus(other.damage) : 0;
-      return { other, score: distance + threat - vulnerable - retaliation + crowdFocus - finisherPriority };
-    })
-    .sort((a, b) => a.score - b.score || a.other.i - b.other.i)[0]?.other;
-  if (brain && selected) {
-    brain.targetId = selected.i;
-    brain.targetLockUntil = world.tick + 36;
-  }
-  return selected;
-}
-
-function cpuIncomingThreat(world, player, target) {
-  const projectile = world.entities.find(entity => {
-    if (entity.owner === player.i || !['projectile', 'bomb'].includes(entity.type)) return false;
-    const owner = world.players.find(other => other.i === entity.owner);
-    if (world.rules.teams && owner?.team === player.team) return false;
-    const dx = player.x - entity.x;
-    const approaching = entity.type === 'bomb' || Math.sign(dx) === Math.sign(entity.vx);
-    return approaching && Math.abs(dx) < 260 && Math.abs(player.y - entity.y) < 75;
-  });
-  if (projectile) return { kind: 'projectile', direction: Math.sign(projectile.x - player.x) || 1 };
-  if (!target?.action) return null;
-  const move = target.action.move || {};
-  const startup = target.action.startup ?? move.startup ?? 0;
-  const activeEnd = startup + (move.active || 0);
-  const threateningFrame = target.action.frame >= Math.max(0, startup - 4) && target.action.frame <= activeEnd;
-  const reach = (move.reachX || 70) + (player.width + target.width) / 2 + 20;
-  if (threateningFrame && Math.abs(target.x - player.x) <= reach && Math.abs(target.y - player.y) < (move.reachY || 75)) {
-    return { kind: 'attack', direction: Math.sign(target.x - player.x) || target.face || 1 };
-  }
-  return null;
-}
-
 function decideCpuRecovery(world, player, profile) {
   const recovery = selectRecoveryTarget(world.platforms, player);
   const toward = Math.sign(recovery.x - player.x);
@@ -2586,7 +2526,7 @@ function decideCpuInput(world, player, difficulty) {
   const profile = CPU_PROFILES[difficulty] || CPU_PROFILES.normal;
   const combatProfile = profile;
   const brain = cpuBrain(world, player);
-  const target = cpuTarget(world, player, brain);
+  const target = selectCpuTarget(world, player, brain);
   if (!target) return cpuInput(world);
 
   if (brain.observedTargetId !== target.i) {
@@ -2649,7 +2589,7 @@ function decideCpuInput(world, player, difficulty) {
     ? toward < 0 ? player.x - support.x : support.x + support.w - player.x
     : Infinity;
   const riskyEdgePursuit = targetOffstage && !!support && edgeClearance < 110;
-  const threat = cpuIncomingThreat(world, player, target);
+  const threat = findIncomingThreat(world, player, target);
   const projectileFighter = !!characterOf(player).moves.specialNeutral.projectile;
   if (world.tick >= brain.planUntil) {
     if (target.shielding || target.stun > 0 || target.landingLag > 0 || quietFrames >= 54) brain.plan = 'pressure';
@@ -2710,8 +2650,12 @@ function decideCpuInput(world, player, difficulty) {
   }
   if (!chosen && canAct && player.characterId === 'bolt' && player.grounded
     && distance > 145 && distance < 360 && player.projectileCooldown <= 0
+    && brain.plan === 'zone'
+    && world.tick >= (brain.boomerangPlanUntil || 0)
+    && world.rng() < (difficulty === 'hard' ? .62 : .42)
     && !world.entities.some(entity => entity.owner === player.i && entity.kind === 'boomerang' && entity.life > 0)) {
     chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
+    brain.boomerangPlanUntil = world.tick + 72;
   }
   if (!chosen && canAct && player.characterId === 'blaze' && player.grounded
     && !targetOffstage && !target.shielding && distance > 115 && distance < 250
