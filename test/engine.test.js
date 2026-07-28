@@ -3044,6 +3044,41 @@ test('hard CPU recognizes a shielding opponent and chooses a grab punish', () =>
   assert.equal(cpu.action?.name, 'grab');
 });
 
+test('hard CPU keeps its four-frame combat reactions and forces a stalled duel back into engagement', () => {
+  const world = createWorld({ rules: { mode: 'stock', stocks: 3, stageId: 'neon-deck' }, seed: 96, cpu: 'hard', roster: [
+    { slot: 0, clientId: 'cpu:initiative-a', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:initiative-b', characterId: 'nova' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const platform = world.platforms[0];
+  world.players.forEach((player, index) => {
+    player.x = 470 + index * 340;
+    player.y = platform.y - player.height / 2;
+    player.grounded = true;
+    player.platformId = platform.id;
+    player.invincible = 0;
+  });
+
+  stepWorld(world, {});
+  for (const brain of world.cpuBrains.values()) assert.equal(brain.nextDecision - world.tick, 4);
+
+  let firstExchange = null;
+  let exchanges = 0;
+  let previousHits = world.players.reduce((sum, player) => sum + player.hitId, 0);
+  for (let frameIndex = 0; frameIndex < 720 && world.phase === 'active'; frameIndex++) {
+    stepWorld(world, {});
+    const hits = world.players.reduce((sum, player) => sum + player.hitId, 0);
+    if (hits > previousHits) {
+      firstExchange ??= world.tick;
+      exchanges += hits - previousHits;
+      previousHits = hits;
+    }
+  }
+
+  assert.ok(firstExchange != null && firstExchange < 240, 'Hard CPUs should initiate before a duel becomes idle');
+  assert.ok(exchanges >= 4, 'Hard CPUs should sustain pressure instead of returning to a spacing deadlock');
+});
+
 test('team CPU ignores a nearby ally and navigates toward an enemy', () => {
   const world = createWorld({ rules: { mode: 'team', teams: true, stocks: 3 }, seed: 7, cpu: 'normal', roster: [
     { slot: 0, clientId: 'ally', characterId: 'volt', team: 0 },

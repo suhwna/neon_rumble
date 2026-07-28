@@ -2467,7 +2467,13 @@ function cpuBrain(world, player) {
     actionRelease: 0,
     targetId: null,
     targetLockUntil: 0,
-    utilityCooldownUntil: 0
+    utilityCooldownUntil: 0,
+    observedTargetId: null,
+    observedHitId: 0,
+    observedTargetHitId: 0,
+    lastExchangeTick: 0,
+    plan: 'pressure',
+    planUntil: 0
   });
   return world.cpuBrains.get(player.i);
 }
@@ -2609,14 +2615,23 @@ function decideCpuRecovery(world, player, profile) {
 function decideCpuInput(world, player, difficulty) {
   if (difficulty === 'dummy') return cpuInput(world);
   const profile = CPU_PROFILES[difficulty] || CPU_PROFILES.normal;
-  // Hard keeps its superior recovery, teching and DI checks above, while its
-  // neutral-game move priorities use the same authored tactics as Normal.
-  // Faster universal combat decisions changed which character archetype won
-  // rather than making every fighter consistently smarter.
-  const combatProfile = difficulty === 'hard' ? CPU_PROFILES.normal : profile;
+  const combatProfile = profile;
   const brain = cpuBrain(world, player);
   const target = cpuTarget(world, player, brain);
   if (!target) return cpuInput(world);
+
+  if (brain.observedTargetId !== target.i) {
+    brain.observedTargetId = target.i;
+    brain.observedHitId = player.hitId;
+    brain.observedTargetHitId = target.hitId;
+    brain.lastExchangeTick = world.tick;
+    brain.planUntil = 0;
+  } else if (brain.observedHitId !== player.hitId || brain.observedTargetHitId !== target.hitId) {
+    brain.observedHitId = player.hitId;
+    brain.observedTargetHitId = target.hitId;
+    brain.lastExchangeTick = world.tick;
+  }
+  const quietFrames = Math.max(0, world.tick - brain.lastExchangeTick);
 
   // Recovery, DI and ledge choices are checked every frame; waiting for the
   // normal decision interval here makes even a strong CPU casually self-destruct.
@@ -2666,9 +2681,22 @@ function decideCpuInput(world, player, difficulty) {
     : Infinity;
   const riskyEdgePursuit = targetOffstage && !!support && edgeClearance < 110;
   const threat = cpuIncomingThreat(world, player, target);
-  const defenseChance = combatProfile.defense;
+  const projectileFighter = !!characterOf(player).moves.specialNeutral.projectile;
+  if (world.tick >= brain.planUntil) {
+    if (target.shielding || target.stun > 0 || target.landingLag > 0 || quietFrames >= 54) brain.plan = 'pressure';
+    else if (projectileFighter && player.projectileCooldown <= 0 && distance > 145) brain.plan = 'zone';
+    else if (player.damage > target.damage + 38) brain.plan = 'bait';
+    else brain.plan = 'pressure';
+    brain.planUntil = world.tick + (difficulty === 'hard' ? 42 : 60);
+  }
+  const forcingInitiative = difficulty === 'hard' && quietFrames >= 54;
+  const pressuring = brain.plan === 'pressure' || forcingInitiative;
+  const defenseChance = forcingInitiative ? combatProfile.defense * .68 : combatProfile.defense;
   const aggression = combatProfile.aggression;
   const canAct = !player.action && player.landingLag <= 0 && player.shieldStun <= 0 && player.dodgeFrames <= 0;
+  const targetMove = target.action?.move;
+  const targetStartup = target.action?.startup ?? targetMove?.startup ?? 0;
+  const targetRecovering = !!target.action && target.action.frame >= targetStartup + (targetMove?.active || 0);
   let chosen;
   let actionHoldFrames = 1;
 
@@ -2713,6 +2741,14 @@ function decideCpuInput(world, player, difficulty) {
   if (!chosen && canAct && distance < 62 && target.shielding && world.rng() < combatProfile.accuracy) {
     chosen = cpuInput(world, toward, 0, BUTTONS.GRAB);
   }
+  if (!chosen && canAct && difficulty === 'hard' && targetRecovering
+    && distance < 145 && Math.abs(dy) < 82) {
+    if (target.shielding && distance < 68) chosen = cpuInput(world, toward, 0, BUTTONS.GRAB);
+    else {
+      const vertical = dy < -34 ? -1 : dy > 42 ? 1 : 0;
+      chosen = cpuInput(world, vertical ? 0 : toward, vertical, BUTTONS.ATTACK);
+    }
+  }
   if (!chosen && canAct && player.grounded && target.damage < 78
     && world.tick >= (brain.utilityCooldownUntil || 0)) {
     const activeOwnTrap = world.entities.some(entity => entity.owner === player.i && entity.type === 'trap' && entity.life > 0);
@@ -2733,7 +2769,7 @@ function decideCpuInput(world, player, difficulty) {
   const groundedFinisher = !chosen && canAct && player.grounded
     && distance < 105 && Math.abs(dy) < 82 && target.damage >= 78;
   const guaranteedPunish = groundedFinisher && (target.stun >= 12 || target.landingLag >= 9 || target.dizzyFrames > 0);
-  const smashChance = difficulty === 'easy' ? .12 : .26;
+  const smashChance = difficulty === 'easy' ? .12 : difficulty === 'hard' ? .36 : .26;
   const stationaryEnough = !isRunningAttackState(player) && Math.abs(player.vx) < characterOf(player).runSpeed * .72;
   if (groundedFinisher && stationaryEnough && (guaranteedPunish || world.rng() < smashChance)) {
     const vertical = dy < -34 ? -1 : dy > 42 ? 1 : 0;
@@ -2773,8 +2809,9 @@ function decideCpuInput(world, player, difficulty) {
       chosen = cpuInput(world, vertical ? 0 : toward, vertical, useSpecial ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
     }
   }
-  if (!chosen && canAct && distance < 205 && Math.abs(dy) < 100 && world.rng() < aggression * .72) {
-    const useSpecial = !riskyEdgePursuit && world.rng() < .24;
+  if (!chosen && canAct && distance < 205 && Math.abs(dy) < 100
+    && world.rng() < aggression * (pressuring ? .92 : .72)) {
+    const useSpecial = !riskyEdgePursuit && world.rng() < (brain.plan === 'zone' ? .34 : .2);
     chosen = cpuInput(world, riskyEdgePursuit ? 0 : toward, 0, useSpecial ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
   }
   if (!chosen && canAct && targetOffstage && !cpuIsOffstage(world, player) && world.rng() < combatProfile.edgeguard) {
@@ -2788,7 +2825,7 @@ function decideCpuInput(world, player, difficulty) {
     chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
   }
   if (!chosen) {
-    const preferredRange = characterOf(player).moves.specialNeutral.projectile ? 155 : 78;
+    const preferredRange = pressuring ? 78 : brain.plan === 'zone' && projectileFighter ? 165 : 112;
     const move = riskyEdgePursuit ? 0 : distance > preferredRange + 30 ? toward : distance < preferredRange - 28 ? -toward : 0;
     const jump = target.y < player.y - 95 && player.grounded && world.rng() < combatProfile.accuracy * .55;
     chosen = cpuInput(world, move, jump ? -1 : 0);
