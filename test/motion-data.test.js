@@ -31,3 +31,14 @@ test('the same action has a distinct active silhouette for every fighter', () =>
     assert.equal(signatures.size, 4, `${action} must differ by fighter`);
   }
 });
+
+test('every authored move exposes finite human joint bends', () => {
+  for (const fighter of ['volt', 'blaze', 'bolt', 'nova']) {
+    for (const action of ACTIONS) {
+      const joints = MOTION.jointFor(fighter, action);
+      assert.ok(joints, `${fighter}.${action} joints`);
+      assert.ok(Object.values(joints).every(Number.isFinite), `${fighter}.${action} finite joints`);
+      assert.ok(Object.values(joints).some(value => Math.abs(value) >= 2), `${fighter}.${action} visible bend`);
+    }
+  }
+});

@@ -262,7 +262,7 @@ test('solo bot match starts a normal stock battle and stays out of the public ro
   assert.equal((await ack(fighter.socket, 'room:leave')).ok, true);
 });
 
-test('bot versus bot demo uses two random CPU fighters without recording the viewer as a fighter', async () => {
+test('bot versus bot demo uses four random CPU fighters without recording the viewer as a fighter', async () => {
   const viewer = await connect('DemoViewer');
   const created = await ack(viewer.socket, 'room:create', {
     demo: true,
@@ -281,10 +281,10 @@ test('bot versus bot demo uses two random CPU fighters without recording the vie
   assert.equal((await ack(viewer.socket, 'room:start')).ok, true);
   const started = await startedEvent;
   assert.equal(started.snapshot.phase, 'countdown');
-  assert.equal(started.snapshot.players.length, 2);
-  assert.deepEqual(started.snapshot.players.map(player => player.nickname), ['BOT A', 'BOT B']);
+  assert.equal(started.snapshot.players.length, 4);
+  assert.deepEqual(started.snapshot.players.map(player => player.nickname), ['BOT A', 'BOT B', 'BOT C', 'BOT D']);
   assert.ok(started.snapshot.players.every(player => player.clientId.startsWith('cpu:demo-')));
-  assert.equal(new Set(started.snapshot.players.map(player => player.characterId)).size, 2);
+  assert.equal(new Set(started.snapshot.players.map(player => player.characterId)).size, 4);
   assert.ok(started.snapshot.players.every(player => FIGHTERS.some(fighter => fighter.id === player.characterId)));
 
   assert.equal((await ack(viewer.socket, 'room:leave')).ok, true);

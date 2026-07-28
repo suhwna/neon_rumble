@@ -155,6 +155,7 @@
             <h3>조작키</h3>
             <div class="training-control-grid">
               <p><kbd>← →</kbd><span>이동 · 두 번 입력 대시</span></p>
+              <p><kbd>Ctrl + ← →</kbd><span>정밀 걷기 유지</span></p>
               <p><kbd>↑</kbd><span>점프 · 공중에서 한 번 더</span></p>
               <p><kbd>↓</kbd><span>하강 중 빠른 낙하 · 반투명 발판 통과</span></p>
               <p><kbd>↑ + Z</kbd><span>동시 입력 시 숏홉 공중 공격</span></p>
@@ -186,6 +187,7 @@
               <li><kbd>Z + X</kbd><span><b>최종 필살기</b> 게이지 100%일 때 발동. 기존 조작 유지</span></li>
               <li><kbd>↑ 짧게</kbd><span><b>숏홉</b> 점프키를 빨리 놓아 낮게 점프</span></li>
               <li><kbd>방향키 유지</kbd><span><b>걷기·달리기</b> 처음에는 걷고 계속 유지하면 달리기, 빠르게 두 번 입력하면 대시</span></li>
+              <li><kbd>Ctrl + 방향키</kbd><span><b>정밀 이동</b> 달리기로 전환하지 않고 느린 걷기를 유지</span></li>
               <li><kbd>BOLT ↘/↙</kbd><span><b>기어가기</b> 낮은 자세를 유지하며 천천히 전진</span></li>
               <li><kbd>하강 중 ↓</kbd><span><b>급강하</b> 정점을 지난 뒤 새로 입력하면 빠르게 낙하하며 반짝임 표시</span></li>
               <li><kbd>지상 ↓</kbd><span><b>앉기 내성</b> 앉은 상태로 피격되면 넉백이 85%로 감소</span></li>
@@ -290,8 +292,13 @@
     </main>
     <script src="/socket-client.js"></script>
     <script src="/content.js"></script>
-    <script src="/motion-data.js"></script>
-    <script src="/network-quality.js"></script>
+  <script src="/motion-data.js"></script>
+  <script src="/motion-constraints.js"></script>
+  <script src="/network-quality.js"></script>
+  <script src="/runtime-monitor.js"></script>
+    <script src="/input-policy.js"></script>
+    <script src="/combat-readability.js"></script>
+    <script src="/audio-feedback.js"></script>
     <script src="game.js"></script>
   </body>
 </html>

@@ -118,7 +118,7 @@ let selectedCharacter = localStorage.getItem('neon_character') || 'volt';
 let selectedPalette = Number(localStorage.getItem('neon_palette') || 0);
 let players = [], platforms = [], entities = [], items = [], stage = STAGES[0], rules = { ...DEFAULT_RULES };
 let snapshots = [], latestSnapshot = null, keys = new Set(), particles = [], trails = [], lastEvents = new Set(), trailClock = 0, effectQuality = 1;
-let lastFrame = performance.now(), inputSeq = 0, lastInputSent = 0, muted = false, audio;
+let lastFrame = performance.now(), inputSeq = 0, lastInputSent = 0;
 let pingSamples = [], snapshotIntervals = [], lastSnapshotArrival = 0, ping = 0, networkJitter = 0, adaptiveDelay = 90, remainingTicks = 0, winnerIndex = null;
 let paused = false, hitboxes = false, localCue = null, localAttackIntent = null;
 let trainingInputHistory = [], trainingInputSignature = '', trainingInputSequence = 0, trainingInputLastRender = 0;
@@ -130,10 +130,14 @@ let roomNoticeTimer = null;
 const runtimeMetrics = window.__NEON_METRICS__ = {
   fps: 0, frameMs: 0, snapshotHz: 0, interpolationMs: adaptiveDelay,
   particles: 0, trails: 0, players: 0, heapMb: 0, slowFrames: 0,
-  inputAckMs: 0, correctionPx: 0, correctionPeakPx: 0, hardCorrections: 0
+  inputAckMs: 0, correctionPx: 0, correctionPeakPx: 0, hardCorrections: 0, emergencyCorrections: 0,
+  reliableInputs: 0, volatileInputs: 0
 };
 const networkQuality = new window.NEON_NETWORK.NetworkQualityTracker(runtimeMetrics);
-let metricWindowStarted = performance.now(), metricFrames = 0, metricFrameTime = 0, metricSnapshots = 0;
+const keyboardIntent = new window.NEON_INPUT.KeyboardIntentTracker();
+const inputTransport = new window.NEON_INPUT.InputTransportPolicy(runtimeMetrics);
+const audioFeedback = new window.NEON_AUDIO.AudioFeedback();
+const runtimeMonitor = new window.NEON_RUNTIME_MONITOR.RuntimeMonitor(performance.now());
 let visualFixtureActive = false;
 const waitingUiNodes = [
   [roomSettings, document.querySelector('#waiting-settings-mount')],
@@ -186,7 +190,7 @@ const ULTIMATE_TITLES = {
 };
 
 const TUTORIAL_STEPS = [
-  { id: 'move', category: '이동 기초', title: '좌우로 이동', command: '← / →', goal: '좌우로 100px 이동', description: '방향키를 눌러 거리를 벌렸다가 다시 접근하세요.', tip: '한 번 입력은 일반 이동, 같은 방향을 빠르게 두 번 입력하면 대시합니다.' },
+  { id: 'move', category: '이동 기초', title: '좌우로 이동', command: '← / →', goal: '좌우로 100px 이동', description: '방향키를 눌러 거리를 벌렸다가 다시 접근하세요.', tip: 'Ctrl을 함께 누르면 계속 정밀 걷기, 방향을 유지하면 달리기, 빠르게 두 번 입력하면 대시입니다.' },
   { id: 'dash', category: '이동 기초', title: '대시', command: '→ →', goal: '대시 상태 만들기', description: '같은 방향을 빠르게 두 번 입력해 대시하세요.', tip: '대시는 접근과 거리 조절의 핵심입니다.' },
   { id: 'jump', category: '공중 이동', title: '점프', command: '↑', goal: '지상에서 점프', description: '위 방향키로 점프하세요. 짧게 놓으면 숏홉이 됩니다.', tip: '공격과 동시에 누르면 숏홉 공중기가 바로 나갑니다.' },
   { id: 'double-jump', category: '공중 이동', title: '2단 점프', command: '공중 ↑', goal: '공중에서 다시 점프', description: '첫 점프가 끝나기 전에 위 방향키를 다시 누르세요.', tip: '복귀할 때 바로 소비하지 말고 필요한 높이에서 사용하세요.' },
@@ -757,7 +761,7 @@ function receiveSnapshot(snapshot) {
     }
   }
   lastSnapshotArrival = receivedAt;
-  metricSnapshots += 1;
+  runtimeMonitor.snapshot();
   const buffered = { receivedAt, data: snapshot };
   snapshots.push(buffered); if (snapshots.length > 30) snapshots.shift(); latestSnapshot = buffered;
   rules = snapshot.rules; stage = STAGES.find(item => item.id === snapshot.stage.id) || STAGES[0]; remainingTicks = snapshot.remainingTicks;
@@ -988,10 +992,21 @@ function renderNetworkState(dt, now) {
       const predictedVx = lerp(localSource.vx, targetVx, clamp(elapsed * (localSource.grounded ? 25 : 14), 0, 1));
       const predictedX = localSource.x + (localSource.vx + predictedVx) * .5 * elapsed;
       const predictedY = localSource.y + (localSource.grounded ? 0 : localSource.vy * elapsed + 720 * elapsed * elapsed);
-      const correctionError = Math.hypot(predictedX - display.x, predictedY - display.y);
-      const hardCorrection = networkQuality.correction(correctionError, now);
-      const correction = hardCorrection || Math.min(1, dt * 30);
-      display.x = lerp(display.x, predictedX, correction); display.y = lerp(display.y, predictedY, correction);
+      const lifecycleJump = localSource.respawn > 0 || display.respawn > 0
+        || !!localSource.eliminated !== !!display.eliminated;
+      if (lifecycleJump) {
+        // KO and respawn deliberately cross the stage in one server update.
+        // Snap that authored lifecycle transition without reporting it as a
+        // network prediction failure or polluting correction telemetry.
+        display.x = localSource.x;
+        display.y = localSource.y;
+      } else {
+        const correctionError = Math.hypot(predictedX - display.x, predictedY - display.y);
+        const hardCorrection = networkQuality.correction(correctionError, now);
+        const correction = hardCorrection || Math.min(1, dt * 30);
+        display.x = lerp(display.x, predictedX, correction);
+        display.y = lerp(display.y, predictedY, correction);
+      }
       copyState(display, localSource);
       display.actionFrame = (Number(localSource.actionFrame) || 0) + (localSource.hitstop > 0 ? 0 : elapsed * 60);
       display.phaseProgress = extrapolatedPhaseProgress(localSource, elapsed);
@@ -1009,7 +1024,8 @@ function renderNetworkState(dt, now) {
 
 function readInput() {
   const gp = navigator.getGamepads?.()[0];
-  const horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) || (Math.abs(gp?.axes?.[0] || 0) > .2 ? gp.axes[0] : 0);
+  const keyboardHorizontal = keyboardIntent.horizontal(keys, performance.now());
+  const horizontal = keyboardHorizontal || (Math.abs(gp?.axes?.[0] || 0) > .2 ? gp.axes[0] : 0);
   const vertical = (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) || (Math.abs(gp?.axes?.[1] || 0) > .2 ? gp.axes[1] : 0);
   let buttons = 0;
   if (horizontal < -.2) buttons |= BUTTONS.LEFT; if (horizontal > .2) buttons |= BUTTONS.RIGHT;
@@ -1025,9 +1041,13 @@ function sendInput(now, force = false) {
   const input = readInput(), clientTime = performance.now(), seq = ++inputSeq;
   recordTrainingInput(input); updateTutorialInput(input);
   networkQuality.sent(seq, clientTime);
-  // Input frames are complete state snapshots. When the transport is backed up,
-  // an old frame is harmful and the next fresh frame supersedes it.
-  socket.volatile.emit('input:frame', { seq, clientTime, ...input }); lastInputSent = now;
+  const payload = { seq, clientTime, ...input };
+  // Button/direction edges must arrive: losing a press or release feels like a
+  // broken controller. Repeated held-state frames are replaceable and stay
+  // volatile so congestion cannot build a stale movement queue.
+  if (inputTransport.channel(input, force) === 'reliable') socket.emit('input:frame', payload);
+  else socket.volatile.emit('input:frame', payload);
+  lastInputSent = now;
 }
 
 setInterval(() => {
@@ -1086,7 +1106,7 @@ function draw(dt) {
   drawBackground(); drawBlastZone(); drawPlatforms(); drawEntities(); drawRespawnPlatforms();
   drawTrails();
   drawDashAfterimages();
-  for (const player of players) drawPlayer(player, dt);
+  for (const player of window.NEON_READABILITY.layerOrder(players, myIndex)) drawPlayer(player, dt);
   drawBlastMarks();
   drawShieldBreakEffects();
   drawParticles();
@@ -1950,14 +1970,14 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
   if (!authored) return styled;
   if (phase === 'startup' || phase === 'charge') {
     const anticipation = Math.sin(t * Math.PI * .5);
-    return applyPoseDelta(styled, authored.windup, anticipation * .52);
+    return applyPoseDelta(styled, authored.windup, anticipation * .68);
   }
   if (phase === 'active') {
     const contact = 1 - Math.abs(t - .28) / .72;
-    return applyPoseDelta(styled, authored.active, clamp(contact, .42, 1) * .38);
+    return applyPoseDelta(styled, authored.active, clamp(contact, .42, 1) * .56);
   }
   if (phase === 'recovery') {
-    return applyPoseDelta(styled, authored.recovery, (1 - t) * .42);
+    return applyPoseDelta(styled, authored.recovery, (1 - t) * .5);
   }
   return styled;
 }
@@ -1996,7 +2016,9 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
       const poseProgress = phase === 'charge'
         ? .72 + clamp(((player.chargeFrames || 10) - 10) / 80, 0, 1) * .28
         : progress;
-      return fighterAttackPose(player, sampleKeyframes(frames, poseProgress), action, motion, phase, poseProgress);
+      const authoredPose = fighterAttackPose(player, sampleKeyframes(frames, poseProgress), action, motion, phase, poseProgress);
+      const spinning = ['wheelSpin', 'voltSpin', 'ironSpin', 'starOrbit', 'backRoll', 'roll'].includes(motion);
+      return window.NEON_MOTION_CONSTRAINTS?.constrainPose(authoredPose, { spinning }) || authoredPose;
     }
   }
   const statePose = (frames, value) => fighterStatePose(player, sampleKeyframes(frames, value), action, value, age);
@@ -3012,8 +3034,19 @@ function drawPlayer(p, dt) {
   const targetFeet={frontFootX,frontFootY,backFootX,backFootY},feet=p.visualFeet||={...targetFeet},feetMix=1-Math.exp(-Math.max(.001,dt)*feetRate);
   for(const key of Object.keys(targetFeet))feet[key]=lerp(feet[key],targetFeet[key],feetMix);
   ({frontFootX,frontFootY,backFootX,backFootY}=feet);
-  const frontKnee=[(p.face*6+frontFootX)*.5+p.face*4,(hipY+frontFootY)*.5];
-  const backKnee=[(-p.face*6+backFootX)*.5-p.face*4,(hipY+backFootY)*.5];
+  let frontKnee=[(p.face*6+frontFootX)*.5+p.face*4,(hipY+frontFootY)*.5];
+  let backKnee=[(-p.face*6+backFootX)*.5-p.face*4,(hipY+backFootY)*.5];
+  const authoredJoints = attack ? window.NEON_MOTION?.jointFor(fighter.id, action) : null;
+  const jointWeight = !authoredJoints ? 0
+    : phase === 'active' ? 1
+      : phase === 'startup' || phase === 'charge' ? progress * .48
+        : phase === 'recovery' ? (1-progress) * .52 : 0;
+  if (jointWeight) {
+    frontKnee[0] += p.face * (authoredJoints.frontKneeX || 0) * jointWeight;
+    frontKnee[1] += (authoredJoints.frontKneeY || 0) * jointWeight;
+    backKnee[0] += p.face * (authoredJoints.backKneeX || 0) * jointWeight;
+    backKnee[1] += (authoredJoints.backKneeY || 0) * jointWeight;
+  }
   drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4);
   drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5);
   let frontX = p.face * 23, frontY = 3, backX = -p.face * 18, backY = 7;
@@ -3137,6 +3170,12 @@ function drawPlayer(p, dt) {
   }
   const frontElbow=[(p.face*7+frontX)*.52+p.face*4,(bodyCenterY-7+frontY+bodyCenterY)*.5];
   const backElbow=[(-p.face*6+backX)*.52-p.face*3,(bodyCenterY-4+backY+bodyCenterY)*.5];
+  if (jointWeight) {
+    frontElbow[0] += p.face * (authoredJoints.frontElbowX || 0) * jointWeight;
+    frontElbow[1] += (authoredJoints.frontElbowY || 0) * jointWeight;
+    backElbow[0] += p.face * (authoredJoints.backElbowX || 0) * jointWeight;
+    backElbow[1] += (authoredJoints.backElbowY || 0) * jointWeight;
+  }
   drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4);
   drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5);
 
@@ -3190,8 +3229,29 @@ function drawPlayer(p, dt) {
   p.visualLastX = p.x;
   p.visualLastY = p.y;
 
-  ctx.globalAlpha = 1; ctx.fillStyle = '#fff'; ctx.font = '900 11px Inter'; ctx.textAlign = 'center';
-  ctx.fillText(playerTag(p), p.x, p.y - p.height / 2 - 15);
+  ctx.save();
+  const tag = String(playerTag(p)).slice(0, players.length >= 3 ? 12 : 18);
+  const readabilityCue = window.NEON_READABILITY.cue(p);
+  const tagY = p.y - p.height / 2 - 24;
+  ctx.font = '900 10px Inter';
+  const tagWidth = Math.max(38, ctx.measureText(tag).width + 16);
+  ctx.fillStyle = 'rgba(3,6,14,.88)';
+  ctx.beginPath();ctx.roundRect(p.x-tagWidth/2,tagY-11,tagWidth,17,5);ctx.fill();
+  ctx.strokeStyle = readabilityCue === 'hit' ? '#ffffff' : color;
+  ctx.lineWidth = readabilityCue === 'active' || readabilityCue === 'hit' ? 2.5 : p.i === myIndex ? 2 : 1;
+  ctx.globalAlpha = readabilityCue === 'recovery' ? .68 : 1;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';ctx.textAlign='center';ctx.fillText(tag,p.x,tagY+1);
+  if (players.length >= 3 && readabilityCue !== 'neutral') {
+    const cueColor = readabilityCue === 'hit' ? '#ffffff'
+      : readabilityCue === 'windup' ? '#ffd65a'
+        : readabilityCue === 'active' ? color
+          : readabilityCue === 'dodge' ? '#7ce8ff'
+            : readabilityCue === 'shield' ? '#a9f4ff' : 'rgba(255,255,255,.55)';
+    ctx.globalAlpha = 1;ctx.fillStyle = cueColor;
+    ctx.fillRect(p.x-tagWidth/2+4,tagY+8,tagWidth-8,readabilityCue === 'active' || readabilityCue === 'hit' ? 3 : 2);
+  }
+  ctx.restore();
   if (state === 'waiting' && !p.clientId?.startsWith('cpu:')) {
     const lobbyPlayer = room?.players?.find(player => player.clientId === p.clientId || player.index === p.i);
     if (lobbyPlayer) {
@@ -3453,17 +3513,12 @@ function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p
 function loop(now){
   requestAnimationFrame(loop);
   const frameMs=Math.min(33,now-lastFrame),dt=frameMs/1000;lastFrame=now;
-  metricFrames+=1;metricFrameTime+=frameMs;if(frameMs>25)runtimeMetrics.slowFrames+=1;
-  if(now-metricWindowStarted>=1000){
-    const seconds=(now-metricWindowStarted)/1000;
-    runtimeMetrics.fps=+(metricFrames/seconds).toFixed(1);
-    runtimeMetrics.frameMs=+(metricFrameTime/metricFrames).toFixed(2);
-    runtimeMetrics.snapshotHz=+(metricSnapshots/seconds).toFixed(1);
-    runtimeMetrics.interpolationMs=+adaptiveDelay.toFixed(1);
-    runtimeMetrics.particles=particles.length;runtimeMetrics.trails=trails.length;runtimeMetrics.players=players.length;
-    runtimeMetrics.heapMb=performance.memory?+(performance.memory.usedJSHeapSize/1048576).toFixed(1):0;
-    metricWindowStarted=now;metricFrames=0;metricFrameTime=0;metricSnapshots=0;runtimeMetrics.slowFrames=0;
-  }
+  const metricSample=runtimeMonitor.frame(now,frameMs,{
+    interpolationMs:+adaptiveDelay.toFixed(1),
+    particles:particles.length,trails:trails.length,players:players.length,
+    heapMb:performance.memory?+(performance.memory.usedJSHeapSize/1048576).toFixed(1):0
+  });
+  if(metricSample)Object.assign(runtimeMetrics,metricSample);
   updateParticles(dt);
   if(state==='playing'||state==='waiting'){sendInput(now);renderNetworkState(dt,now);if(state==='playing')updateTutorialState();}
   draw(dt);
@@ -3503,6 +3558,7 @@ document.querySelector('#training-exit').addEventListener('click', leaveRoomToMe
 
 addEventListener('keydown',event=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(event.code))event.preventDefault();
+  if (!event.repeat) keyboardIntent.keyDown(event.code, performance.now());
   keys.add(event.code);
   if (!event.repeat && (state === 'playing' || state === 'waiting') && ['KeyZ','KeyX','KeyV','KeyF','KeyG','KeyE'].includes(event.code)) {
     const self = players.find(player => player.i === myIndex);
@@ -3539,7 +3595,7 @@ addEventListener('keydown',event=>{
     }
     sendInput(performance.now(), true);
   }
-  if (!event.repeat && (state === 'playing' || state === 'waiting') && ['KeyW','KeyA','KeyS','KeyD','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyC','ShiftLeft','ShiftRight'].includes(event.code)) sendInput(performance.now(), true);
+  if (!event.repeat && (state === 'playing' || state === 'waiting') && ['KeyW','KeyA','KeyS','KeyD','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyC','ShiftLeft','ShiftRight','ControlLeft','ControlRight'].includes(event.code)) sendInput(performance.now(), true);
   if (event.code === 'Enter' && state === 'waiting') {
     const owner = room?.ownerClientId === identity?.clientId;
     const target = owner ? waitingStart : waitingReady;
@@ -3558,11 +3614,14 @@ addEventListener('keyup',event=>{
     };
     localAttackIntent = null;
   }
+  keyboardIntent.keyUp(event.code, performance.now());
   keys.delete(event.code);
   sendInput(performance.now(),true);
 });
 function releaseAllInputs(){
   localAttackIntent = null;
+  keyboardIntent.reset();
+  inputTransport.reset();
   keys.clear();
   if(!['playing','waiting'].includes(state))return;
   socket.emit('input:frame',{seq:++inputSeq,clientTime:performance.now(),buttons:0,horizontal:0,vertical:0});
@@ -3570,25 +3629,10 @@ function releaseAllInputs(){
 }
 addEventListener('blur',releaseAllInputs);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAllInputs();});
-document.querySelector('#sound-button').addEventListener('click',event=>{muted=!muted;event.currentTarget.textContent=muted?'×':'♪';});
-function ensureAudio(){audio||=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();}
-function beep(freq,duration,type){if(muted)return;ensureAudio();const oscillator=audio.createOscillator(),gain=audio.createGain();oscillator.type=type;oscillator.frequency.value=freq;gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);oscillator.connect(gain).connect(audio.destination);oscillator.start();oscillator.stop(audio.currentTime+duration);}
+document.querySelector('#sound-button').addEventListener('click',event=>{const muted=audioFeedback.setMuted(!audioFeedback.muted);event.currentTarget.textContent=muted?'×':'♪';});
+function beep(freq,duration,type){audioFeedback.tone(freq,duration,type);}
 function impactSound(strength, options = {}) {
-  if (muted) return;
-  ensureAudio();
-  const amount = clamp(Number(strength) || .5, .35, 1.55);
-  const duration = options.critical ? .14 : options.pummel ? .035 : .045 + amount * .025;
-  const startFrequency = options.shield ? 330 : options.critical ? 92 : 205 - amount * 62;
-  const endFrequency = options.shield ? 185 : options.critical ? 38 : Math.max(48, startFrequency * .42);
-  const oscillator = audio.createOscillator(), gain = audio.createGain();
-  oscillator.type = options.shield ? 'triangle' : options.sweet ? 'square' : 'sawtooth';
-  oscillator.frequency.setValueAtTime(startFrequency, audio.currentTime);
-  oscillator.frequency.exponentialRampToValueAtTime(endFrequency, audio.currentTime + duration);
-  gain.gain.setValueAtTime(Math.min(.065, .024 + amount * .018), audio.currentTime);
-  gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration);
-  oscillator.connect(gain).connect(audio.destination);
-  oscillator.start();
-  oscillator.stop(audio.currentTime + duration);
+  audioFeedback.impact(strength, options);
 }
 function clamp(value,min,max){return Math.max(min,Math.min(max,value));}
 function playerTag(player){
@@ -3599,6 +3643,7 @@ function formatTime(ticks){if(rules.mode==='training')return '∞';const seconds
 
 if (new URLSearchParams(location.search).get('visualTest') === '1') {
   window.__NEON_SET_VISUAL_FIXTURE__ = (fixture = 'motion-grid') => {
+    const motionAudit = /^motion:([A-Za-z0-9]+):(startup|active|recovery)$/.exec(fixture);
     const makePlayer = (fighter, index, x, action, options = {}) => {
       const move = fighter.moves[action] || {};
       const y = 500 - fighter.height / 2, direction = options.face || 1;
@@ -3641,7 +3686,16 @@ if (new URLSearchParams(location.search).get('visualTest') === '1') {
     camera = { x: 640, y: 390, zoom: fixture === 'four-player-impact' ? 1.12 : .94 };
     menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
     countdown.classList.add('hidden'); trainingPanel.classList.add('hidden'); game.classList.remove('hidden');
-    if (fixture === 'four-player-impact') {
+    if (motionAudit) {
+      const [, action, phase] = motionAudit;
+      const positions = [275, 515, 755, 995];
+      players = FIGHTERS.map((fighter, index) => makePlayer(fighter, index, positions[index], action, {
+        face: index < 2 ? 1 : -1,
+        phase,
+        progress: phase === 'startup' ? .72 : phase === 'active' ? .28 : .35,
+        variant: action.startsWith('ground') && action !== 'groundNeutral' ? 'tilt' : null
+      }));
+    } else if (fixture === 'four-player-impact') {
       players = [
         makePlayer(FIGHTERS[0], 0, 535, 'groundSide', { face: 1, progress: .25 }),
         makePlayer(FIGHTERS[1], 1, 615, 'groundHit', { face: -1, impactAngle: 0, impactStrength: 1.3 }),

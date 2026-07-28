@@ -21,9 +21,11 @@ test('network tracker records smooth and hard correction budgets', () => {
   const output = metrics(), tracker = new NetworkQualityTracker(output);
   assert.equal(tracker.correction(20, 100), null);
   assert.equal(output.hardCorrections, 0);
-  assert.equal(tracker.correction(110, 400), 1);
+  assert.equal(tracker.correction(110, 400), 0.45);
   assert.equal(output.hardCorrections, 1);
   tracker.correction(120, 500);
   assert.equal(output.hardCorrections, 1, 'one correction episode should not count every frame');
-  assert.equal(output.correctionPeakPx, 120);
+  assert.equal(tracker.correction(240, 800), 1);
+  assert.equal(output.emergencyCorrections, 1);
+  assert.equal(output.correctionPeakPx, 240);
 });

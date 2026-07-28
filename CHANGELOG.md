@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0-beta.9
+
+- Expanded BOT vs BOT demo matches from two to four random CPU fighters.
+- Added a three-minute browser soak that repeatedly checks FPS, snapshot rate, particle count, emergency corrections, and JavaScript heap growth.
+- Improved BLAZE CPU target selection, armored neutral-air use, and useful neutral-special charging without changing player move data.
+- Render-audited all 14 authored move families for all four fighters across startup, active, and recovery phases.
+- Added humanoid pose constraints for extreme body scale, rotation, limbs, and feet.
+- Added `Ctrl + direction` as a persistent precision-walk modifier.
+- Added a four-client stress test with independent 0/55/105/160ms latency and up to 2% packet loss.
+- Split CPU policy, CPU navigation, motion constraints, and runtime monitoring into independently tested modules.
+
+## 1.1.0-beta.8
+
+- Ordered combat rendering by state so active attacks and hit reactions remain visible above neutral overlapping fighters.
+- Rebuilt compact player tags with palette ownership and startup, active, recovery, hit, dodge, and shield state cues.
+- Increased authored per-move silhouette strength without adding particles or full-screen effects.
+- Added keyboard intent tracking for walk, held run, and explicit double-tap dash behavior.
+- Sent button and direction edges reliably while leaving replaceable held-state frames volatile.
+- Smoothed medium server corrections across several frames while reserving snaps for emergency divergence.
+- Added deterministic four-player CPU soak tests and an `npm run audit:ai` report for move use, hits, KOs, self-destructs, recoveries, and winners.
+- Added practical close-range CPU grab mixups after the soak test exposed zero grabs in sustained brawls.
+- Split input policy, combat readability, audio feedback, and simulation auditing out of the main client and engine files.
+
 ## 1.1.0-beta.7
 
 - Moved fighter move silhouettes into `motion-data.js` with distinct windup, contact, and recovery profiles for every normal, aerial, and special.

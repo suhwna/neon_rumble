@@ -246,13 +246,18 @@ function startRoom(room) {
   if (room.playing || room.slots.length < (room.rules.mode === 'training' || room.botMatch || room.demo ? 1 : 2)) return false;
   let roster = room.slots.map(slot => ({ slot: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId, palette: slot.palette, team: slot.team }));
   if (room.demo) {
-    const firstIndex = Math.floor(Math.random() * FIGHTERS.length);
-    const secondOffset = 1 + Math.floor(Math.random() * Math.max(1, FIGHTERS.length - 1));
-    const secondIndex = (firstIndex + secondOffset) % FIGHTERS.length;
-    roster = [
-      { slot: 0, clientId: 'cpu:demo-a', nickname: 'BOT A', characterId: FIGHTERS[firstIndex].id, palette: 0, team: 0 },
-      { slot: 1, clientId: 'cpu:demo-b', nickname: 'BOT B', characterId: FIGHTERS[secondIndex].id, palette: 1, team: 1 }
-    ];
+    const offset = Math.floor(Math.random() * FIGHTERS.length);
+    roster = Array.from({ length: 4 }, (_, index) => {
+      const fighter = FIGHTERS[(offset + index) % FIGHTERS.length];
+      return {
+        slot: index,
+        clientId: `cpu:demo-${String.fromCharCode(97 + index)}`,
+        nickname: `BOT ${String.fromCharCode(65 + index)}`,
+        characterId: fighter.id,
+        palette: index,
+        team: index
+      };
+    });
   }
   if (room.rules.mode === 'training' && roster.length === 1) roster.push({ slot: 1, clientId: 'cpu:training', nickname: 'BOT', characterId: 'blaze', palette: 0, team: 1 });
   if (room.botMatch && roster.length === 1) {

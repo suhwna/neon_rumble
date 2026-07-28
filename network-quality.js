@@ -15,7 +15,8 @@
         inputAckMs: 0,
         correctionPx: 0,
         correctionPeakPx: 0,
-        hardCorrections: 0
+        hardCorrections: 0,
+        emergencyCorrections: 0
       });
     }
 
@@ -47,7 +48,13 @@
         this.metrics.hardCorrections += 1;
         this.lastHardCorrectionAt = now;
       }
-      return distance > 90 ? 1 : null;
+      if (distance > 220) {
+        this.metrics.emergencyCorrections = (this.metrics.emergencyCorrections || 0) + 1;
+        return 1;
+      }
+      // Medium errors converge across a few frames instead of visibly
+      // teleporting. Truly unsafe divergence still snaps immediately.
+      return distance > 90 ? 0.45 : null;
     }
   }
 

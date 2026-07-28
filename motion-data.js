@@ -119,11 +119,47 @@
     })
   });
 
+  const ACTION_JOINTS = Object.freeze({
+    groundNeutral: { frontElbowX: -5, frontElbowY: -7, backElbowX: -2, backElbowY: 5, frontKneeX: 3, frontKneeY: -2 },
+    groundSide: { frontElbowX: -8, frontElbowY: -10, backElbowX: -4, backElbowY: 7, frontKneeX: 6, frontKneeY: -4, backKneeX: -4 },
+    groundUp: { frontElbowX: 9, frontElbowY: 4, backElbowX: -8, backElbowY: 5, frontKneeX: 4, backKneeX: -4 },
+    groundDown: { frontElbowY: 5, backElbowY: -4, frontKneeX: -7, frontKneeY: -12, backKneeX: 5, backKneeY: -4 },
+    dashAttack: { frontElbowX: -7, frontElbowY: -6, backElbowX: -5, backElbowY: 8, frontKneeX: 8, frontKneeY: -5, backKneeX: -7 },
+    airNeutral: { frontElbowX: -4, frontElbowY: -6, backElbowX: 4, backElbowY: -5, frontKneeX: -5, frontKneeY: -9, backKneeX: 5, backKneeY: -8 },
+    airForward: { frontElbowX: -6, frontElbowY: -8, backElbowX: 3, backElbowY: 7, frontKneeX: -8, frontKneeY: -12, backKneeX: 5 },
+    airBack: { frontElbowX: 4, frontElbowY: -5, backElbowX: -7, backElbowY: -8, frontKneeX: 5, backKneeX: 8, backKneeY: -11 },
+    airUp: { frontElbowX: 8, frontElbowY: 3, backElbowX: -7, backElbowY: 4, frontKneeX: -5, frontKneeY: -6, backKneeX: 4 },
+    airDown: { frontElbowX: -4, frontElbowY: -7, backElbowX: 4, backElbowY: -7, frontKneeX: 8, frontKneeY: -8, backKneeX: -8, backKneeY: -7 },
+    specialNeutral: { frontElbowX: -7, frontElbowY: -9, backElbowX: -5, backElbowY: 8, frontKneeX: 3, backKneeX: -3 },
+    specialSide: { frontElbowX: -9, frontElbowY: -8, backElbowX: -6, backElbowY: 8, frontKneeX: 8, frontKneeY: -5, backKneeX: -6 },
+    specialUp: { frontElbowX: 8, frontElbowY: 3, backElbowX: -8, backElbowY: 4, frontKneeX: -4, frontKneeY: -7, backKneeX: 4 },
+    specialDown: { frontElbowX: -5, frontElbowY: 5, backElbowX: 5, backElbowY: 5, frontKneeX: -7, frontKneeY: -9, backKneeX: 7, backKneeY: -9 }
+  });
+
+  const FIGHTER_JOINTS = Object.freeze({
+    volt: { frontElbowX: 2, frontElbowY: -2, frontKneeX: 2 },
+    blaze: { frontElbowY: 4, backElbowY: 3, frontKneeY: 3, backKneeY: 3 },
+    bolt: { frontElbowX: -2, backElbowX: 2, frontKneeY: -4, backKneeY: -4 },
+    nova: { frontElbowX: 4, frontElbowY: -3, backElbowX: -4, backElbowY: -2 }
+  });
+
+  function jointProfile(fighterId, action) {
+    const actionJoints = ACTION_JOINTS[action];
+    if (!actionJoints) return null;
+    const fighterJoints = FIGHTER_JOINTS[fighterId] || {};
+    const result = {};
+    for (const key of new Set([...Object.keys(actionJoints), ...Object.keys(fighterJoints)])) {
+      result[key] = (actionJoints[key] || 0) + (fighterJoints[key] || 0);
+    }
+    return result;
+  }
+
   const api = Object.freeze({
     profiles: PROFILES,
     profileFor(fighterId, action) {
       return PROFILES[fighterId]?.[action] || null;
-    }
+    },
+    jointFor: jointProfile
   });
 
   root.NEON_MOTION = api;

@@ -86,6 +86,7 @@ docker compose down
 | 입력 | 기능 |
 | --- | --- |
 | `←/→` 또는 `A/D` | 걷기, 달리기, 두 번 입력 시 대시 |
+| `Ctrl + ←/→` | 정밀 걷기 유지 |
 | `↑`, `W`, `Space` | 점프, 공중에서 한 번 더 입력해 2단 점프 |
 | `↓` 또는 `S` | 앉기, 공중 하강 중 빠른 낙하, 반투명 발판 통과 |
 | `Z` 짧게 | 지상 잽 / 공중 중립 공격 |
@@ -149,7 +150,13 @@ NOVA의 옆 X와 위 X는 X를 누른 시간에 따라 순간이동 거리가 �
 ```bash
 npm test
 npm run test:e2e
+npm run test:e2e:soak
+npm run audit:ai
 ```
+
+`audit:ai`는 네 캐릭터의 하드 CPU 난투를 여러 시드로 장시간 빠르게 재생해 기술 사용량·적중·KO·자살·복귀·승자 통계를 JSON으로 출력합니다.
+
+`test:e2e:soak`는 실제 Chromium에서 4인 CPU 난투를 기본 3분간 실행하며 FPS, 스냅샷 빈도, 파티클 상한, 위치 보정과 JavaScript 힙 증가를 검사합니다. `NEON_SOAK_MS` 환경 변수로 실행 시간을 조절할 수 있습니다.
 
 Node 테스트와 실제 Chromium E2E가 다음 항목을 검증합니다.
 

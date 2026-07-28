@@ -1,4 +1,11 @@
 const { BUTTONS, FIGHTERS, STAGES, ITEMS, DEFAULT_RULES } = require('./content');
+const {
+  CPU_PROFILES,
+  blazeTargetPriorityBonus,
+  blazeAirNeutralWanted,
+  blazeNeutralChargeFrames
+} = require('./cpu-policy');
+const { selectRecoveryTarget, isOffstage } = require('./cpu-navigation');
 
 const TICK_RATE = 60;
 const WORLD_W = 1280;
@@ -2442,12 +2449,6 @@ function updateHazards(world) {
 
 const CPU_DIRECTION_BUTTONS = BUTTONS.LEFT | BUTTONS.RIGHT | BUTTONS.UP | BUTTONS.DOWN;
 const CPU_ACTION_BUTTONS = BUTTONS.ATTACK | BUTTONS.SPECIAL | BUTTONS.SHIELD | BUTTONS.GRAB;
-const CPU_PROFILES = {
-  easy: { reaction: 10, aggression: .48, defense: .18, accuracy: .56, edgeguard: .15 },
-  normal: { reaction: 6, aggression: .72, defense: .43, accuracy: .79, edgeguard: .4 },
-  hard: { reaction: 4, aggression: .9, defense: .72, accuracy: .95, edgeguard: .68 }
-};
-
 function cpuInput(world, horizontal = 0, vertical = 0, actions = 0) {
   horizontal = Math.abs(horizontal) < .2 ? 0 : Math.sign(horizontal);
   vertical = Math.abs(vertical) < .2 ? 0 : Math.sign(vertical);
@@ -2478,39 +2479,6 @@ function cpuBrain(world, player) {
   return world.cpuBrains.get(player.i);
 }
 
-function cpuRecoveryTarget(world, player) {
-  const widePlatforms = world.platforms.filter(platform => platform.w >= 120);
-  // Pass-through platforms are useful once the fighter is already above the
-  // stage, but they are poor recovery anchors from underneath. Prefer the
-  // stage's solid body so the CPU aims at a real ledge instead of burning its
-  // recovery trying to reach a small platform high above it.
-  const solidPlatforms = widePlatforms.filter(platform => !platform.passThrough);
-  const candidates = solidPlatforms.length ? solidPlatforms : widePlatforms;
-  const scored = candidates.map(platform => {
-    const leftLedge = platform.x - 8;
-    const rightLedge = platform.x + platform.w + 8;
-    const belowPlatform = player.y > platform.y - 35;
-    let safeX;
-    if (belowPlatform) {
-      safeX = Math.abs(player.x - leftLedge) <= Math.abs(player.x - rightLedge) ? leftLedge : rightLedge;
-    } else {
-      safeX = clamp(player.x, platform.x + 42, platform.x + platform.w - 42);
-    }
-    const verticalPenalty = Math.max(0, player.y - platform.y) * .72;
-    const stablePlatformBonus = Math.min(platform.w, 860) * .06;
-    return { platform, x: safeX, score: Math.abs(safeX - player.x) + verticalPenalty - stablePlatformBonus };
-  }).sort((a, b) => a.score - b.score);
-  return scored[0] || { platform: { x: 400, y: 500, w: 480 }, x: 640 };
-}
-
-function cpuIsOffstage(world, player) {
-  if (player.grounded || player.ledge) return false;
-  return !world.platforms.some(platform =>
-    player.x >= platform.x - 22 && player.x <= platform.x + platform.w + 22
-    && player.y <= platform.y + 25
-  );
-}
-
 function cpuTarget(world, player, brain) {
   const candidates = world.players.filter(other =>
     other.i !== player.i && !other.eliminated && !other.respawn
@@ -2538,7 +2506,8 @@ function cpuTarget(world, player, brain) {
       const vulnerable = other.stun > 0 || other.landingLag > 0 ? 18 : 0;
       const retaliation = player.comboTimer > 0 && player.comboAttacker === other.i ? 72 : 0;
       const crowdFocus = (focusedBy.get(other.i) || 0) * 135;
-      return { other, score: distance + threat - vulnerable - retaliation + crowdFocus };
+      const finisherPriority = player.characterId === 'blaze' ? blazeTargetPriorityBonus(other.damage) : 0;
+      return { other, score: distance + threat - vulnerable - retaliation + crowdFocus - finisherPriority };
     })
     .sort((a, b) => a.score - b.score || a.other.i - b.other.i)[0]?.other;
   if (brain && selected) {
@@ -2571,7 +2540,7 @@ function cpuIncomingThreat(world, player, target) {
 }
 
 function decideCpuRecovery(world, player, profile) {
-  const recovery = cpuRecoveryTarget(world, player);
+  const recovery = selectRecoveryTarget(world.platforms, player);
   const toward = Math.sign(recovery.x - player.x);
   if (player.ledge) {
     const roll = world.rng() < profile.defense * .35;
@@ -2635,7 +2604,7 @@ function decideCpuInput(world, player, difficulty) {
 
   // Recovery, DI and ledge choices are checked every frame; waiting for the
   // normal decision interval here makes even a strong CPU casually self-destruct.
-  if (player.ledge || cpuIsOffstage(world, player)) {
+  if (player.ledge || isOffstage(world.platforms, player)) {
     brain.input = decideCpuRecovery(world, player, profile);
     brain.actionRelease = world.tick + 1;
     return brain.input;
@@ -2649,7 +2618,7 @@ function decideCpuInput(world, player, difficulty) {
     return cpuInput(world, world.rng() < profile.defense ? away : 0, 0, BUTTONS.SHIELD);
   }
   if (player.stun > 0) {
-    const recovery = cpuRecoveryTarget(world, player);
+    const recovery = selectRecoveryTarget(world.platforms, player);
     const towardStage = Math.sign(recovery.x - player.x);
     const tech = player.vy > 0 && Math.abs(player.y - recovery.platform.y) < 90 && profile.accuracy > .68;
     return cpuInput(world, towardStage, 0, tech ? BUTTONS.SHIELD : 0);
@@ -2670,7 +2639,7 @@ function decideCpuInput(world, player, difficulty) {
   const dx = target.x - player.x, dy = target.y - player.y;
   const distance = Math.hypot(dx, dy * .72);
   const toward = Math.sign(dx || player.face);
-  const targetOffstage = cpuIsOffstage(world, target);
+  const targetOffstage = isOffstage(world.platforms, target);
   const support = player.grounded
     ? world.platforms.find(platform => platform.id === player.platformId)
       || world.platforms.find(platform => player.x >= platform.x && player.x <= platform.x + platform.w
@@ -2697,11 +2666,17 @@ function decideCpuInput(world, player, difficulty) {
   const targetMove = target.action?.move;
   const targetStartup = target.action?.startup ?? targetMove?.startup ?? 0;
   const targetRecovering = !!target.action && target.action.frame >= targetStartup + (targetMove?.active || 0);
+  const nearbyEnemies = world.players.filter(other =>
+    other.i !== player.i && !other.eliminated && !other.respawn
+    && (!world.rules.teams || other.team !== player.team)
+    && Math.hypot(other.x - player.x, (other.y - player.y) * .72) < 120
+  ).length;
   let chosen;
   let actionHoldFrames = 1;
 
   if (threat && canAct && world.rng() < defenseChance) {
-    if (player.characterId === 'blaze' && player.grounded && distance < 145 && world.rng() < .14) {
+    if (player.characterId === 'blaze' && player.grounded && distance < 145
+      && world.rng() < (difficulty === 'hard' ? .23 : .14)) {
       chosen = cpuInput(world, 0, 1, BUTTONS.SPECIAL);
     } else if (!player.grounded) chosen = cpuInput(world, -threat.direction, 0, player.airDodgeAvailable ? BUTTONS.SHIELD : 0);
     else chosen = cpuInput(world, -threat.direction, 0, BUTTONS.SHIELD);
@@ -2738,8 +2713,50 @@ function decideCpuInput(world, player, difficulty) {
     && !world.entities.some(entity => entity.owner === player.i && entity.kind === 'boomerang' && entity.life > 0)) {
     chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
   }
+  if (!chosen && canAct && player.characterId === 'blaze' && player.grounded
+    && !targetOffstage && !target.shielding && distance > 115 && distance < 250
+    && edgeClearance > 145 && world.tick >= (brain.armoredApproachUntil || 0)
+    && world.rng() < (difficulty === 'hard' ? .38 : .22)) {
+    // BLAZE is too slow to win a pure footrace. Its authored side special is
+    // the safe armored commitment for crossing mid range, but only when there
+    // is stage behind it and the target is not waiting with a shield.
+    chosen = cpuInput(world, toward, 0, BUTTONS.SPECIAL);
+    brain.armoredApproachUntil = world.tick + 84;
+  }
+  if (!chosen && canAct && player.characterId === 'blaze' && !player.grounded
+    && blazeAirNeutralWanted({
+      distance,
+      verticalGap: dy,
+      nearbyEnemies,
+      targetAttacking: !!target.action,
+      roll: world.rng()
+    })) {
+    // The armored neutral-air is BLAZE's authored scramble breaker. A neutral
+    // stick keeps crowded landings from degrading into slower vertical aerials.
+    chosen = cpuInput(world, 0, 0, BUTTONS.ATTACK);
+  }
+  if (!chosen && canAct && player.characterId === 'blaze' && player.grounded
+    && !targetOffstage && player.projectileCooldown <= 0
+    && distance >= 275 && distance <= 520 && Math.abs(dy) < 105
+    && edgeClearance > 120) {
+    const chargeFrames = blazeNeutralChargeFrames({ distance, targetRecovering });
+    if (chargeFrames > 1 && world.rng() < (difficulty === 'hard' ? .54 : .34)) {
+      chosen = cpuInput(world, 0, 0, BUTTONS.SPECIAL);
+      actionHoldFrames = chargeFrames;
+    }
+  }
   if (!chosen && canAct && distance < 62 && target.shielding && world.rng() < combatProfile.accuracy) {
     chosen = cpuInput(world, toward, 0, BUTTONS.GRAB);
+  }
+  if (!chosen && canAct && player.grounded && target.grounded
+    && distance < 58 && Math.abs(dy) < 48
+    && world.tick >= (brain.grabMixupUntil || 0)
+    && (target.shielding || target.dodgeFrames > 0 || world.rng() < (difficulty === 'hard' ? .16 : .08))) {
+    // A grab is a close-range answer, not a diversity quota. It enters the
+    // mix only when normal pressure would be beaten by shield/dodge or as an
+    // occasional hard read at point blank.
+    chosen = cpuInput(world, toward, 0, BUTTONS.GRAB);
+    brain.grabMixupUntil = world.tick + 54;
   }
   if (!chosen && canAct && difficulty === 'hard' && targetRecovering
     && distance < 145 && Math.abs(dy) < 82) {
@@ -2814,7 +2831,7 @@ function decideCpuInput(world, player, difficulty) {
     const useSpecial = !riskyEdgePursuit && world.rng() < (brain.plan === 'zone' ? .34 : .2);
     chosen = cpuInput(world, riskyEdgePursuit ? 0 : toward, 0, useSpecial ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
   }
-  if (!chosen && canAct && targetOffstage && !cpuIsOffstage(world, player) && world.rng() < combatProfile.edgeguard) {
+  if (!chosen && canAct && targetOffstage && !isOffstage(world.platforms, player) && world.rng() < combatProfile.edgeguard) {
     chosen = player.grounded
       ? cpuInput(world, 0, 0, BUTTONS.SPECIAL)
       : cpuInput(world, toward, dy > 15 ? 1 : 0, BUTTONS.ATTACK);
@@ -2833,7 +2850,9 @@ function decideCpuInput(world, player, difficulty) {
 
   brain.input = chosen;
   const actions = chosen.buttons & CPU_ACTION_BUTTONS;
-  brain.actionRelease = world.tick + (actions === BUTTONS.SHIELD ? 5 : actions & BUTTONS.ATTACK ? actionHoldFrames : 1);
+  brain.actionRelease = world.tick + (actions === BUTTONS.SHIELD ? 5
+    : actions & (BUTTONS.ATTACK | BUTTONS.SPECIAL) ? actionHoldFrames
+      : 1);
   return chosen;
 }
 
