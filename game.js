@@ -198,7 +198,7 @@ const TUTORIAL_STEPS = [
   { id: 'tilt', category: '공격 기초', title: '틸트 공격', command: '방향 → Z', goal: '틸트 공격 발동', description: '방향을 먼저 누른 상태에서 Z를 누르세요.', tip: '빠르고 후딜이 짧아 콤보와 견제에 유리합니다.' },
   { id: 'smash', category: '공격 기초', title: '스매시 공격', command: 'Z 길게 홀드', goal: '스매시 공격 발동', description: '지상에서 Z를 14프레임 이상 확실히 유지하면 스매시를 충전합니다. 방향 없이 모으면 앞 스매시, 모으는 동안 방향을 잡으면 해당 방향 스매시가 나갑니다.', tip: 'Z를 짧게 놓으면 중립은 잽, 방향 입력 중에는 틸트가 나갑니다. 공중 Z·대시 Z는 즉시 발동합니다.' },
   { id: 'shield', category: '방어 기초', title: '실드', command: 'C 유지', goal: '실드 펼치기', description: 'C를 유지해 공격을 막는 실드를 펼치세요.', tip: '실드가 깨지면 긴 시간 무방비 상태가 됩니다.' },
-  { id: 'parry', category: '방어 기초', title: '패링', command: 'C 유지 → 피격 직전 해제', goal: '패링 성공', description: 'C로 실드를 잠깐 유지한 뒤 상대 공격이 닿기 직전에 놓으세요. 해제 직후 5프레임이 패링 판정입니다.', tip: '성공하면 상대만 16프레임 정지해 강한 반격 기회를 얻습니다.' },
+  { id: 'parry', category: '방어 기초', title: '패링', command: 'C 유지 → 피격 직전 해제', goal: '패링 성공', description: 'C로 실드를 잠깐 유지한 뒤 상대 공격이 닿기 직전에 놓으세요. 해제 직후 6프레임이 패링 판정입니다.', tip: '성공하면 상대가 20프레임 정지합니다. 바로 Z나 X를 선입력해 반격하세요.' },
   { id: 'dodge', category: '방어 기초', title: '구르기 회피', command: '←/→ + C', goal: '지상 구르기 사용', description: '방향키와 C를 함께 눌러 상대를 통과하며 회피하세요.', tip: '회피를 반복하면 무적 시간은 줄고 후딜은 늘어납니다.' },
   { id: 'special', category: '캐릭터 기술', title: '필살기', command: 'X / 방향 + X', goal: '아무 필살기 사용', description: 'X와 방향키 조합으로 캐릭터 고유 기술을 사용하세요.', tip: '중립·옆·위·아래 필살기는 서로 역할이 다릅니다.' },
   { id: 'throw', category: '잡기', title: '잡기와 던지기', command: 'V → 방향', goal: '더미를 잡아 던지기', description: '더미 가까이에서 V로 잡은 뒤 방향키로 던지세요.', tip: '실드 중인 상대도 잡을 수 있습니다.' },
@@ -3018,7 +3018,7 @@ function drawPlayer(p, dt) {
   }
   if (p.parryFrames > 0 && !p.shielding) {
     ctx.strokeStyle = '#fff36b'; ctx.lineWidth = 5; ctx.globalAlpha *= .45 + p.parryFrames * .12;
-    ctx.beginPath(); ctx.arc(0, 0, p.width + (5 - p.parryFrames) * 8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(0, 0, p.width + (6 - p.parryFrames) * 8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
   }
   ctx.translate(bodyX, bodyY);
   if (novaWarpCharging) ctx.scale(0, 0);
@@ -3301,29 +3301,6 @@ function drawPlayer(p, dt) {
   p.visualLastX = p.x;
   p.visualLastY = p.y;
 
-  ctx.save();
-  const tag = String(playerTag(p)).slice(0, players.length >= 3 ? 12 : 18);
-  const readabilityCue = window.NEON_READABILITY.cue(p);
-  const tagY = p.y - p.height / 2 - 24;
-  ctx.font = '900 10px Inter';
-  const tagWidth = Math.max(38, ctx.measureText(tag).width + 16);
-  ctx.fillStyle = 'rgba(3,6,14,.88)';
-  ctx.beginPath();ctx.roundRect(p.x-tagWidth/2,tagY-11,tagWidth,17,5);ctx.fill();
-  ctx.strokeStyle = readabilityCue === 'hit' ? '#ffffff' : color;
-  ctx.lineWidth = readabilityCue === 'active' || readabilityCue === 'hit' ? 2.5 : p.i === myIndex ? 2 : 1;
-  ctx.globalAlpha = readabilityCue === 'recovery' ? .68 : 1;
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';ctx.textAlign='center';ctx.fillText(tag,p.x,tagY+1);
-  if (players.length >= 3 && readabilityCue !== 'neutral') {
-    const cueColor = readabilityCue === 'hit' ? '#ffffff'
-      : readabilityCue === 'windup' ? '#ffd65a'
-        : readabilityCue === 'active' ? color
-          : readabilityCue === 'dodge' ? '#7ce8ff'
-            : readabilityCue === 'shield' ? '#a9f4ff' : 'rgba(255,255,255,.55)';
-    ctx.globalAlpha = 1;ctx.fillStyle = cueColor;
-    ctx.fillRect(p.x-tagWidth/2+4,tagY+8,tagWidth-8,readabilityCue === 'active' || readabilityCue === 'hit' ? 3 : 2);
-  }
-  ctx.restore();
   if (state === 'waiting' && !p.clientId?.startsWith('cpu:')) {
     const lobbyPlayer = room?.players?.find(player => player.clientId === p.clientId || player.index === p.i);
     if (lobbyPlayer) {
@@ -3335,7 +3312,7 @@ function drawPlayer(p, dt) {
       ctx.font = '900 9px Inter';
       const badgeW = Math.max(66, ctx.measureText(text).width + 18);
       const badgeX = p.x - badgeW / 2;
-      const badgeY = p.y - p.height / 2 - 48;
+      const badgeY = p.y - p.height / 2 - 29;
       if (!ready && connected) ctx.globalAlpha = .82 + Math.sin(performance.now() / 180) * .12;
       ctx.fillStyle = 'rgba(5,8,18,.92)';
       ctx.beginPath();

@@ -347,7 +347,7 @@ test('same-frame direct attacks trade without player-slot priority', () => {
   assert.equal(left.damage, right.damage);
 });
 
-test('releasing a held shield opens an order-independent five-frame parry with punish advantage', () => {
+test('releasing a held shield opens an order-independent six-frame parry with punish advantage', () => {
   const world = worldWith();
   const attacker = world.players[0], defender = world.players[1];
   for (let seq = 1; seq <= 3; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq, BUTTONS.SHIELD) });
@@ -358,8 +358,9 @@ test('releasing a held shield opens an order-independent five-frame parry with p
   stepWorld(world, { 0: frame(4), 1: frame(4) });
   assert.equal(defender.damage, 0);
   assert.ok(defender.shield >= shieldBeforeParry && defender.shield <= shieldBeforeParry + .1);
-  assert.ok(attacker.hitstop >= 16);
+  assert.ok(attacker.hitstop >= 20);
   assert.ok(defender.hitstop >= 2);
+  assert.ok(defender.invincible >= 8);
   assert.equal(defender.shieldDropLag, 0);
   assert.equal(defender.actionName, 'parrySuccess');
   assert.ok(world.events.some(event => event.type === 'parry'));
@@ -371,8 +372,24 @@ test('releasing a held shield opens an order-independent five-frame parry with p
   second.actionName = 'groundNeutral';
   stepWorld(reversed, { 0: frame(4), 1: frame(4) });
   assert.equal(first.damage, 0);
-  assert.ok(second.hitstop >= 16);
+  assert.ok(second.hitstop >= 20);
   assert.ok(reversed.events.some(event => event.type === 'parry' && event.player === first.i));
+});
+
+test('a parry buffers an immediate Z punish while the attacker remains frozen', () => {
+  const world = worldWith();
+  const attacker = world.players[0], defender = world.players[1];
+  for (let seq = 1; seq <= 3; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq, BUTTONS.SHIELD) });
+  const attack = { ...FIGHTERS[0].moves.groundNeutral };
+  attacker.action = { name: 'groundNeutral', move: attack, frame: attack.startup - 1, startup: attack.startup, hit: [], activated: false };
+  attacker.actionName = 'groundNeutral';
+  stepWorld(world, { 0: frame(4), 1: frame(4) });
+  stepWorld(world, { 0: frame(5), 1: tap(5, BUTTONS.ATTACK) });
+  for (let seq = 6; seq <= 10 && !defender.action; seq++) {
+    stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  }
+  assert.equal(defender.action?.name, 'groundNeutral');
+  assert.ok(attacker.hitstop > 0, 'the parried attacker should still be frozen when the punish starts');
 });
 
 test('a fresh shield press blocks but does not parry, while shield shifting moves the shield hurtbox', () => {
@@ -830,6 +847,18 @@ test('repeated neutral attacks progress through a three-hit jab sequence', () =>
   assert.equal(player.jabStep, 2); assert.ok(player.jabTimer > 0);
   stepWorld(world, { 0: tap(24, BUTTONS.ATTACK), 1: frame(24) });
   assert.equal(player.action?.name, 'groundJab3');
+});
+
+test('an early Z press during jab startup stays buffered for the next jab', () => {
+  const world = worldWith(), player = world.players[1];
+  world.players[0].x = 100;
+  stepWorld(world, { 0: frame(1), 1: tap(1, BUTTONS.ATTACK) });
+  stepWorld(world, { 0: frame(2), 1: frame(2) });
+  stepWorld(world, { 0: frame(3), 1: tap(3, BUTTONS.ATTACK) });
+  for (let seq = 4; seq <= 22 && player.action?.name !== 'groundJab2'; seq++) {
+    stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  }
+  assert.equal(player.action?.name, 'groundJab2');
 });
 
 test('jab starters cause grounded flinch while finishers launch and tumble', () => {
@@ -1321,6 +1350,19 @@ test('grab ignores shield and directional throw releases the target', () => {
   assert.equal(world.players[1].grabbedBy, null);
   assert.ok(world.players[1].vy < -300);
   assert.ok(world.events.some(event => event.type === 'throw' && event.direction === 'throwUp'));
+});
+
+test('Blaze core shot keeps heavyweight commitment without oversized uncharged reward', () => {
+  const core = FIGHTERS.find(fighter => fighter.id === 'blaze').moves.specialNeutral;
+  assert.equal(core.damage, 11.5);
+  assert.equal(core.kx, 350);
+  assert.equal(core.projectileRadius, 36);
+  assert.equal(core.splashRadius, 64);
+  assert.equal(core.projectileCooldown, 78);
+  assert.equal(core.maxActiveProjectiles, 1);
+  assert.equal(core.startup, 14);
+  assert.equal(core.recovery, 25);
+  assert.equal(Number((core.damage * 1.4).toFixed(1)), 16.1);
 });
 
 test('four throws have distinct Ultimate-style roles and grant throw invincibility', () => {

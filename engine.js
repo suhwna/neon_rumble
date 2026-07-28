@@ -19,6 +19,8 @@ const BLAST_MARGIN_X = 360;
 const BLAST_TOP = -300;
 const BLAST_BOTTOM = WORLD_H + 260;
 const ACTION_BUFFER_FRAMES = 10;
+const JAB_CHAIN_BUFFER_FRAMES = 24;
+const JAB_CHAIN_WINDOW_FRAMES = 24;
 const JUMP_BUFFER_FRAMES = 10;
 // Grounded Z stays a jab/tilt until the player deliberately holds it for
 // fourteen frames. Shorter gates overlapped ordinary keyboard press duration
@@ -29,7 +31,10 @@ const SMASH_MAX_DAMAGE_SCALE = 1.4;
 const SPECIAL_TURNAROUND_FRAMES = 4;
 const DASH_DURATION_FRAMES = 16;
 const PIVOT_DASH_WINDOW = 6;
-const PARRY_FRAMES = 5;
+const PARRY_FRAMES = 6;
+const PARRY_MISS_LAG_FRAMES = 10;
+const PARRY_ATTACKER_FREEZE_FRAMES = 20;
+const PARRY_INVINCIBLE_FRAMES = 8;
 const SHIELD_MAX = 50;
 const REGRAB_LOCK_FRAMES = 60;
 const LEDGE_HANG_MAX_FRAMES = 300;
@@ -270,12 +275,13 @@ function bufferActionInput(player, input, previous) {
     const dashAttackIntent = player.grounded
       && Math.abs(input.horizontal) > .35
       && isRunningAttackState(player);
-    const canChargeSmash = player.grounded && !player.heldItem && !dashAttackIntent
+    const bufferingJabFollowup = player.action?.move?.jab > 0 && player.action.move.jab < 3;
+    const canChargeSmash = player.grounded && !player.heldItem && !dashAttackIntent && !bufferingJabFollowup
       && bit(input.buttons, BUTTONS.ATTACK);
     player.actionBuffer = {
       type: 'attack',
       input: { ...input },
-      frames: ACTION_BUFFER_FRAMES,
+      frames: bufferingJabFollowup ? JAB_CHAIN_BUFFER_FRAMES : ACTION_BUFFER_FRAMES,
       variant: directional && !canChargeSmash && !dashAttackIntent ? 'tilt' : 'normal',
       pendingHold: canChargeSmash,
       holdFrames: canChargeSmash ? 1 : 0,
@@ -833,10 +839,10 @@ function hitPlayer(world, attacker, target, move, direction) {
     return true;
   }
   if (target.parryFrames > 0) {
-    attacker.hitstop = Math.max(attacker.hitstop || 0, 16);
+    attacker.hitstop = Math.max(attacker.hitstop || 0, PARRY_ATTACKER_FREEZE_FRAMES);
     target.hitstop = Math.max(target.hitstop || 0, 3);
     target.parryFrames = 0; target.shielding = false; target.shieldBuffer = 0;
-    target.shieldDropLag = 0; target.invincible = Math.max(target.invincible || 0, 4);
+    target.shieldDropLag = 0; target.invincible = Math.max(target.invincible || 0, PARRY_INVINCIBLE_FRAMES);
     target.actionName = 'parrySuccess';
     emit(world, 'parry', {
       player: target.i, attacker: attacker.i,
@@ -1239,7 +1245,7 @@ function processAction(world, player, input, previous) {
   const interruptible = action.name !== 'grab' && cancelIntent && move.cancelWindow > 0
     && action.frame >= totalFrames - move.cancelWindow;
   if (action.frame >= totalFrames || interruptible) {
-    if (move.jab && move.jab < 3) { player.jabStep = move.jab; player.jabTimer = 18; }
+    if (move.jab && move.jab < 3) { player.jabStep = move.jab; player.jabTimer = JAB_CHAIN_WINDOW_FRAMES; }
     else if (move.jab === 3) { player.jabStep = 0; player.jabTimer = 0; }
     player.pendingLandingLag = 0;
     const entersFreefall = action.name === 'specialUp' && !player.grounded && move.causesFreefall !== false;
@@ -2840,7 +2846,7 @@ function stepWorld(world, inputs = {}) {
   }
   // Arm shield-release parries before resolving attacks. Ultimate-style parries
   // require a shield to be held for at least three frames, then released during
-  // the five-frame drop window. The prepass keeps same-tick results roster-order
+  // the six-frame drop window. The prepass keeps same-tick results roster-order
   // independent.
   for (const player of world.players) {
     const input = resolvedInputs.get(player.i);
@@ -2862,7 +2868,7 @@ function stepWorld(world, inputs = {}) {
     if (canParry) {
       player.parryFrames = Math.max(player.parryFrames, PARRY_FRAMES + 1);
       player.shielding = false; player.shieldHoldFrames = 0; player.shieldReleaseQueued = false;
-      player.shieldDropLag = 11;
+      player.shieldDropLag = PARRY_MISS_LAG_FRAMES;
       player.actionName = 'parryReady';
       emit(world, 'parry-ready', { player: player.i });
     }

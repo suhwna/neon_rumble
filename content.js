@@ -43,6 +43,11 @@
       moves[key] = merged;
     }
     for (const [key, definition] of Object.entries(moves)) {
+      // Keyboard jab strings need a dependable contact window. The later hits
+      // reach slightly farther so their own light pushback does not drop them.
+      if (definition.jab === 1 || definition.jab === 2) definition.active += 1;
+      if (definition.jab === 2) definition.reachX += 4;
+      else if (definition.jab === 3) definition.reachX += 6;
       if (definition.cancelWindow == null) {
         if (definition.recoveryMove || key === 'specialUp') definition.cancelWindow = 0;
         else if (definition.jab && definition.jab < 3) definition.cancelWindow = Math.min(5, Math.max(2, Math.round(definition.recovery * .55)));
@@ -103,7 +108,7 @@
         airBack: { startup: 9, active: 5, recovery: 20, landingLag: 14, damage: 16, kx: 445, ky: 215, reachX: 92, motion: 'backFist' },
         airUp: { startup: 10, active: 6, recovery: 20, landingLag: 13, damage: 14, kx: 165, ky: 440, reachY: 108, motion: 'launcher' },
         airDown: { startup: 13, active: 6, recovery: 25, landingLag: 16, damage: 18, kx: 110, ky: -490, reachX: 76, reachY: 102, motion: 'anvilDrop' },
-        specialNeutral: { projectile: 'core', projectileOnly: true, motion: 'cannon', chargeable: true, startup: 14, active: 2, recovery: 25, damage: 13.5, kx: 390, projectileSpeed: 330, projectileRadius: 42, splashRadius: 80, projectileCooldown: 72, maxActiveProjectiles: 1 },
+        specialNeutral: { projectile: 'core', projectileOnly: true, motion: 'cannon', chargeable: true, startup: 14, active: 2, recovery: 25, damage: 11.5, kx: 350, projectileSpeed: 330, projectileRadius: 36, splashRadius: 64, projectileCooldown: 78, maxActiveProjectiles: 1 },
         specialSide: { dash: 'armor', motion: 'shoulder', armor: true, armorType: 'heavy', armorThreshold: 9, startup: 11, active: 7, recovery: 26, dashSpeed: 450, recoveryDrag: 0.68, damage: 17, kx: 450 },
         specialUp: { recoveryMove: true, recoveryKind: 'rocket', causesFreefall: true, motion: 'rocket', startup: 7, active: 8, recovery: 24, riseSpeed: 625, riseHorizontal: 190, damage: 15, ky: 410 },
         specialDown: {

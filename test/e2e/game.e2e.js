@@ -32,6 +32,44 @@ test('main UI stays inside desktop and mobile viewports', async ({ browser, base
   }
 });
 
+test('waiting room and training controls keep a clear visual hierarchy', async ({ browser, baseURL }) => {
+  const waiting = await openPlayer(browser, baseURL, 'UI-WAITING');
+  await waiting.page.addStyleTag({ content: '#game { visibility: hidden !important; } body { background: #080a12 !important; }' });
+  await waiting.page.locator('#create-button').click();
+  await expect(waiting.page.locator('#waiting-room')).toBeVisible();
+  await expect(waiting.page.locator('#waiting-roster-panel, .waiting-roster-panel')).toBeVisible();
+  await expect(waiting.page.locator('.waiting-loadout')).toHaveScreenshot('waiting-loadout-desktop.png', {
+    animations: 'disabled',
+    caret: 'hide'
+  });
+  await waiting.page.setViewportSize({ width: 390, height: 844 });
+  const waitingBounds = await waiting.page.locator('.waiting-loadout').evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return { left: box.left, right: box.right, bottom: box.bottom, viewport: innerWidth };
+  });
+  expect(waitingBounds.left).toBeGreaterThanOrEqual(0);
+  expect(waitingBounds.right).toBeLessThanOrEqual(waitingBounds.viewport);
+  expect(waitingBounds.bottom).toBeLessThanOrEqual(844);
+  await waiting.context.close();
+
+  const training = await openPlayer(browser, baseURL, 'UI-TRAINING');
+  await training.page.addStyleTag({ content: '#game { visibility: hidden !important; } body { background: #080a12 !important; }' });
+  await training.page.locator('#practice-button').click();
+  await expect(training.page.locator('#training-panel')).toBeVisible();
+  await expect(training.page.locator('.training-tools')).toHaveScreenshot('training-tools-desktop.png', {
+    animations: 'disabled',
+    caret: 'hide'
+  });
+  await training.page.setViewportSize({ width: 390, height: 844 });
+  const trainingBounds = await training.page.locator('.training-panel').evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return { left: box.left, right: box.right, viewport: innerWidth };
+  });
+  expect(trainingBounds.left).toBeGreaterThanOrEqual(0);
+  expect(trainingBounds.right).toBeLessThanOrEqual(trainingBounds.viewport);
+  await training.context.close();
+});
+
 test('fighter silhouettes and four-player impacts stay visually readable', async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto(`${baseURL}/?visualTest=1`);
