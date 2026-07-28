@@ -111,7 +111,7 @@ fetch('/releases.json', { cache: 'no-store' })
 
 const WORLD_W = 1280, WORLD_H = 720, SHIELD_MAX = 50;
 let dpr = 1, viewScale = 1, viewOffsetX = 0, viewOffsetY = 0;
-let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], blastMarks = [], shieldBreakEffects = [], dashAfterimages = [], hitLinks = [];
+let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], blastMarks = [], shieldBreakEffects = [], dashAfterimages = [];
 let ultimateCinematic = null, koCinematics = [];
 let state = 'menu', room = null, myIndex = -1, identity = null;
 let selectedCharacter = localStorage.getItem('neon_character') || 'volt';
@@ -129,9 +129,12 @@ let tutorialState = { active: false, index: 0, lastButtons: 0, startX: 0, advanc
 let roomNoticeTimer = null;
 const runtimeMetrics = window.__NEON_METRICS__ = {
   fps: 0, frameMs: 0, snapshotHz: 0, interpolationMs: adaptiveDelay,
-  particles: 0, trails: 0, players: 0, heapMb: 0, slowFrames: 0
+  particles: 0, trails: 0, players: 0, heapMb: 0, slowFrames: 0,
+  inputAckMs: 0, correctionPx: 0, correctionPeakPx: 0, hardCorrections: 0
 };
+const networkQuality = new window.NEON_NETWORK.NetworkQualityTracker(runtimeMetrics);
 let metricWindowStarted = performance.now(), metricFrames = 0, metricFrameTime = 0, metricSnapshots = 0;
+let visualFixtureActive = false;
 const waitingUiNodes = [
   [roomSettings, document.querySelector('#waiting-settings-mount')],
   [playerList, document.querySelector('#waiting-roster-mount')],
@@ -443,7 +446,7 @@ function restoreMainUi() {
 function beginWarmup(snapshot) {
   if (!snapshot) return;
   state = 'waiting';
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; hitLinks = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
@@ -453,7 +456,7 @@ async function leaveRoomToMenu() {
   await emitAck('room:leave');
   state = 'menu'; room = null; myIndex = -1;
   players = []; snapshots = []; latestSnapshot = null; localCue = null; ultimateCinematic = null;
-  particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; hitLinks = [];
+  particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = [];
   paused = false; hitboxes = false;
   closeTutorial(); setTrainingGuideOpen(false); resetTrainingInputHistory();
   trainingPanel.querySelectorAll('[data-training]').forEach(tool => {
@@ -719,6 +722,7 @@ roomSettings.querySelectorAll('select,input').forEach(control => control.addEven
 
 function beginMatch(snapshot) {
   state = 'playing'; menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
+  networkQuality.reset();
   trainingPanel.classList.toggle('hidden', snapshot.rules.mode !== 'training');
   if (snapshot.rules.mode === 'training') {
     const trainingPlayer = snapshot.players.find(player => player.i === myIndex) || snapshot.players[0];
@@ -731,14 +735,18 @@ function beginMatch(snapshot) {
     closeTutorial();
     setTrainingGuideOpen(false);
   }
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; hitLinks = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
 function receiveSnapshot(snapshot) {
   if (!snapshot) return;
-  if (myIndex >= 0 && snapshot.ackSeq) inputSeq = Math.max(inputSeq, Number(snapshot.ackSeq[myIndex]) || 0);
   const receivedAt = performance.now();
+  if (myIndex >= 0 && snapshot.ackSeq) {
+    const ack = Number(snapshot.ackSeq[myIndex]) || 0;
+    inputSeq = Math.max(inputSeq, ack);
+    networkQuality.acknowledged(ack, receivedAt);
+  }
   if (lastSnapshotArrival > 0) {
     const interval = receivedAt - lastSnapshotArrival;
     if (interval < 500) {
@@ -793,21 +801,19 @@ function processEvents(events) {
           });
           if (impactRings.length > 10) impactRings.splice(0, impactRings.length - 10);
         }
-        if (attacker && player && event.type === 'hit') {
-          const duration = critical || ultimate ? .2 : .13;
-          hitLinks.push({
-            fromX: attacker.x, fromY: attacker.y - attacker.height * .1,
-            toX: hitX, toY: hitY, color: impactColor,
-            life: duration, duration, critical: critical || ultimate
-          });
-          if (hitLinks.length > 12) hitLinks.splice(0, hitLinks.length - 12);
-        }
       }
-      if (player) player.flashUntil = performance.now() + (event.type === 'parry' ? 190 : critical ? 240 : sweet ? 180 : pummel ? 100 : 145);
+      if (player) {
+        const visualDuration = event.type === 'parry' ? 190 : critical || ultimate ? 170 : sweet ? 125 : pummel ? 70 : 92;
+        player.flashUntil = performance.now() + (event.type === 'parry' ? 190 : critical ? 240 : sweet ? 180 : pummel ? 100 : 145);
+        player.impactVisualUntil = performance.now() + visualDuration;
+        player.impactVisualStrength = impactStrength;
+        player.impactVisualAngle = impactAngle;
+      }
       screenShake = Math.max(screenShake, ultimate ? 22 : event.type === 'parry' ? 12 : critical ? 17 : 3 + impactStrength * 4.5 + (sweet ? 2 : 0));
       cameraPunch = Math.max(cameraPunch, ultimate ? .145 : event.type === 'parry' ? .075 : critical ? .12 : Math.min(.078, .012 + impactStrength * .045));
       if (critical || ultimate) criticalFlash = 1;
-      beep(ultimate ? 48 : event.type === 'parry' ? 620 : critical ? 58 : pummel ? 155 : 110, ultimate ? .22 : critical ? .15 : pummel ? .035 : .06, event.type === 'parry' ? 'square' : 'sawtooth');
+      if (event.type === 'parry') beep(620, .075, 'square');
+      else impactSound(impactStrength, { critical: critical || ultimate, sweet, pummel, shield: event.type === 'shield-hit' });
     }
     if (event.type === 'counter') {
       const defender = players.find(item => item.i === event.player);
@@ -982,7 +988,9 @@ function renderNetworkState(dt, now) {
       const predictedVx = lerp(localSource.vx, targetVx, clamp(elapsed * (localSource.grounded ? 25 : 14), 0, 1));
       const predictedX = localSource.x + (localSource.vx + predictedVx) * .5 * elapsed;
       const predictedY = localSource.y + (localSource.grounded ? 0 : localSource.vy * elapsed + 720 * elapsed * elapsed);
-      const correction = Math.hypot(predictedX - display.x, predictedY - display.y) > 90 ? 1 : Math.min(1, dt * 30);
+      const correctionError = Math.hypot(predictedX - display.x, predictedY - display.y);
+      const hardCorrection = networkQuality.correction(correctionError, now);
+      const correction = hardCorrection || Math.min(1, dt * 30);
       display.x = lerp(display.x, predictedX, correction); display.y = lerp(display.y, predictedY, correction);
       copyState(display, localSource);
       display.actionFrame = (Number(localSource.actionFrame) || 0) + (localSource.hitstop > 0 ? 0 : elapsed * 60);
@@ -1014,7 +1022,12 @@ function readInput() {
 }
 function sendInput(now, force = false) {
   if (!['playing', 'waiting'].includes(state) || !force && now - lastInputSent < 33) return;
-  const input = readInput(); recordTrainingInput(input); updateTutorialInput(input); socket.emit('input:frame', { seq: ++inputSeq, clientTime: performance.now(), ...input }); lastInputSent = now;
+  const input = readInput(), clientTime = performance.now(), seq = ++inputSeq;
+  recordTrainingInput(input); updateTutorialInput(input);
+  networkQuality.sent(seq, clientTime);
+  // Input frames are complete state snapshots. When the transport is backed up,
+  // an old frame is harmful and the next fresh frame supersedes it.
+  socket.volatile.emit('input:frame', { seq, clientTime, ...input }); lastInputSent = now;
 }
 
 setInterval(() => {
@@ -1063,7 +1076,7 @@ function draw(dt) {
   if (dt > .024) effectQuality = Math.max(.5, effectQuality - .18);
   else if (dt > .019) effectQuality = Math.max(.68, effectQuality - .06);
   else effectQuality = Math.min(1, effectQuality + dt * .55);
-  updateCamera(dt);
+  if (!visualFixtureActive) updateCamera(dt);
   ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = '#080a12'; ctx.fillRect(0,0,canvas.width,canvas.height);
   ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,viewOffsetX*dpr,viewOffsetY*dpr);
   const shakeX = (Math.random() - .5) * screenShake, shakeY = (Math.random() - .5) * screenShake;
@@ -1074,7 +1087,6 @@ function draw(dt) {
   drawTrails();
   drawDashAfterimages();
   for (const player of players) drawPlayer(player, dt);
-  drawHitLinks();
   drawBlastMarks();
   drawShieldBreakEffects();
   drawParticles();
@@ -1474,18 +1486,23 @@ const ONESHOT_KEYFRAMES = Object.freeze({
     { t: 1, bodyX: 1, bodyY: 5, rotation: -.025, scaleX: 1.08, scaleY: .88, frontHandX: 26, frontHandY: -13, backHandX: -20, backHandY: -7, frontFootX: 14, backFootX: -13 }
   ],
   jump: [
-    { t: 0, bodyX: 1, bodyY: 5, rotation: -.025, scaleX: 1.08, scaleY: .9, frontHandX: 26, frontHandY: -13, backHandX: -20, backHandY: -7, frontFootX: 14, frontFootLift: 4, backFootX: -13, backFootLift: 6 },
-    { t: .5, bodyX: 2, bodyY: -6, rotation: -.05, scaleX: .94, scaleY: 1.08, frontHandX: 29, frontHandY: -18, backHandX: -23, backHandY: -11, frontFootX: 9, frontFootLift: 14, backFootX: -8, backFootLift: 18 },
-    { t: 1, bodyX: 0, bodyY: -2, rotation: .015, scaleX: .99, scaleY: 1.01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    { t: 0, bodyX: -2, bodyY: 6, rotation: .045, scaleX: 1.13, scaleY: .84, frontHandX: -17, frontHandY: 5, backHandX: -24, backHandY: 8, frontFootX: 18, frontFootLift: 1, backFootX: -17, backFootLift: 3 },
+    { t: .18, bodyX: 3, bodyY: -8, rotation: -.075, scaleX: .86, scaleY: 1.2, frontHandX: 31, frontHandY: -23, backHandX: -25, backHandY: -16, frontFootX: 12, frontFootLift: 12, backFootX: -9, backFootLift: 17 },
+    { t: .52, bodyX: 2, bodyY: -5, rotation: -.035, scaleX: .94, scaleY: 1.09, frontHandX: 28, frontHandY: -17, backHandX: -23, backHandY: -11, frontFootX: 8, frontFootLift: 17, backFootX: -7, backFootLift: 21 },
+    { t: .78, bodyX: 1, bodyY: -1, rotation: .015, scaleX: 1.01, scaleY: .99, frontHandX: 24, frontHandY: -8, backHandX: -21, backHandY: -4, frontFootX: 13, frontFootLift: 10, backFootX: -11, backFootLift: 13 },
+    { t: 1, bodyX: 0, bodyY: 1, rotation: .025, scaleX: 1.04, scaleY: .96, frontHandX: 27, frontHandY: -3, backHandX: -24, backHandY: 1, frontFootX: 16, frontFootLift: 5, backFootX: -14, backFootLift: 8 }
   ],
   fall: [
-    { t: 0, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 },
-    { t: .5, bodyY: 2, rotation: .025, scaleX: 1.05, scaleY: .96, frontHandX: 31, frontHandY: 1, backHandX: -29, backHandY: 4, frontFootX: 17, frontFootLift: 3, backFootX: -15, backFootLift: 6 },
-    { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    { t: 0, bodyY: 0, rotation: .02, scaleX: 1.02, scaleY: .98, frontHandX: 25, frontHandY: -5, backHandX: -22, backHandY: -1, frontFootX: 14, frontFootLift: 8, backFootX: -12, backFootLift: 11 },
+    { t: .38, bodyY: 3, rotation: .055, scaleX: 1.08, scaleY: .93, frontHandX: 34, frontHandY: 3, backHandX: -31, backHandY: 6, frontFootX: 19, frontFootLift: 2, backFootX: -17, backFootLift: 6 },
+    { t: .7, bodyY: 4, rotation: .035, scaleX: 1.1, scaleY: .91, frontHandX: 37, frontHandY: 6, backHandX: -34, backHandY: 8, frontFootX: 22, frontFootLift: 0, backFootX: -20, backFootLift: 3 },
+    { t: 1, bodyY: 1, rotation: .015, scaleX: 1.04, scaleY: .96, frontHandX: 28, frontHandY: -2, backHandX: -25, backHandY: 2, frontFootX: 16, frontFootLift: 5, backFootX: -14, backFootLift: 8 }
   ],
   landing: [
-    { t: 0, bodyX: 2, bodyY: 12, rotation: -.035, scaleX: 1.24, scaleY: .71, frontHandX: 31, frontHandY: 8, backHandX: -28, backHandY: 7, frontFootX: 24, backFootX: -25 },
-    { t: .45, bodyX: 1, bodyY: 8, rotation: .02, scaleX: 1.16, scaleY: .81, frontHandX: 26, frontHandY: 2, backHandX: -23, backHandY: 4, frontFootX: 21, backFootX: -22 },
+    { t: 0, bodyX: 4, bodyY: 13, rotation: -.07, scaleX: 1.3, scaleY: .66, frontHandX: 36, frontHandY: 11, backHandX: -33, backHandY: 10, frontFootX: 27, backFootX: -28 },
+    { t: .18, bodyX: 1, bodyY: 15, rotation: .025, scaleX: 1.34, scaleY: .62, frontHandX: 29, frontHandY: 13, backHandX: -27, backHandY: 12, frontFootX: 29, backFootX: -30 },
+    { t: .48, bodyX: -1, bodyY: 8, rotation: .045, scaleX: 1.15, scaleY: .82, frontHandX: 18, frontHandY: 1, backHandX: -14, backHandY: 5, frontFootX: 23, backFootX: -24 },
+    { t: .76, bodyX: 1, bodyY: -2, rotation: -.025, scaleX: .94, scaleY: 1.08, frontHandX: 26, frontHandY: -12, backHandX: -20, backHandY: -5, frontFootX: 17, backFootX: -18 },
     { t: 1, bodyX: 0, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   ledgeHang: [
@@ -1505,14 +1522,16 @@ const ONESHOT_KEYFRAMES = Object.freeze({
     { t: 1, bodyX: 3, bodyY: -5, rotation: .05, scaleX: .88, scaleY: 1.14, frontHandX: 27, frontHandY: -18, backHandX: -19, backHandY: -12, frontFootX: 12, frontFootLift: 15, backFootX: -10, backFootLift: 18 }
   ],
   hit: [
-    { t: 0, bodyX: 9, bodyY: -7, rotation: .32, scaleX: .76, scaleY: 1.18, frontHandX: -35, frontHandY: -17, backHandX: -27, backHandY: 17, frontFootX: 23, frontFootLift: 5, backFootX: -17, backFootLift: 13 },
-    { t: .55, bodyX: 5, bodyY: -3, rotation: .21, scaleX: .87, scaleY: 1.09, frontHandX: -29, frontHandY: -11, backHandX: -22, backHandY: 13, frontFootX: 19, frontFootLift: 4, backFootX: -14, backFootLift: 9 },
-    { t: 1, bodyX: 2, bodyY: 0, rotation: .08, scaleX: .96, scaleY: 1.02, frontHandX: -20, frontHandY: -4, backHandX: -15, backHandY: 8, frontFootX: 15, frontFootLift: 2, backFootX: -13, backFootLift: 5 }
+    { t: 0, bodyX: 12, bodyY: -8, rotation: .38, scaleX: .7, scaleY: 1.25, frontHandX: -39, frontHandY: -20, backHandX: -31, backHandY: 20, frontFootX: 27, frontFootLift: 5, backFootX: -20, backFootLift: 16 },
+    { t: .2, bodyX: 10, bodyY: -10, rotation: .43, scaleX: .76, scaleY: 1.19, frontHandX: -37, frontHandY: -23, backHandX: -29, backHandY: 18, frontFootX: 25, frontFootLift: 7, backFootX: -18, backFootLift: 17 },
+    { t: .58, bodyX: 5, bodyY: -3, rotation: .2, scaleX: .88, scaleY: 1.08, frontHandX: -29, frontHandY: -10, backHandX: -22, backHandY: 13, frontFootX: 19, frontFootLift: 4, backFootX: -14, backFootLift: 9 },
+    { t: 1, bodyX: 1, bodyY: 0, rotation: .06, scaleX: .97, scaleY: 1.01, frontHandX: -19, frontHandY: -3, backHandX: -14, backHandY: 7, frontFootX: 15, frontFootLift: 2, backFootX: -13, backFootLift: 5 }
   ],
   groundHit: [
-    { t: 0, bodyX: 8, bodyY: 12, rotation: .25, scaleX: 1.24, scaleY: .7, frontHandX: -36, frontHandY: -10, backHandX: -29, backHandY: 14, frontFootX: 30, backFootX: -27 },
-    { t: .65, bodyX: 4, bodyY: 8, rotation: .13, scaleX: 1.15, scaleY: .8, frontHandX: -28, frontHandY: -6, backHandX: -22, backHandY: 11, frontFootX: 24, backFootX: -22 },
-    { t: 1, bodyX: 0, bodyY: 3, rotation: .035, scaleX: 1.04, scaleY: .94, frontHandX: -19, frontHandY: -2, backHandX: -15, backHandY: 7, frontFootX: 17, backFootX: -17 }
+    { t: 0, bodyX: 10, bodyY: 13, rotation: .3, scaleX: 1.3, scaleY: .64, frontHandX: -40, frontHandY: -12, backHandX: -31, backHandY: 16, frontFootX: 34, backFootX: -31 },
+    { t: .22, bodyX: 8, bodyY: 15, rotation: .34, scaleX: 1.35, scaleY: .6, frontHandX: -38, frontHandY: -9, backHandX: -30, backHandY: 18, frontFootX: 35, backFootX: -33 },
+    { t: .62, bodyX: 3, bodyY: 8, rotation: .12, scaleX: 1.14, scaleY: .81, frontHandX: -27, frontHandY: -5, backHandX: -21, backHandY: 11, frontFootX: 24, backFootX: -23 },
+    { t: 1, bodyX: 0, bodyY: 3, rotation: .025, scaleX: 1.03, scaleY: .95, frontHandX: -18, frontHandY: -2, backHandX: -14, backHandY: 7, frontFootX: 17, backFootX: -17 }
   ],
   shieldHit: [
     { t: 0, bodyX: -11, bodyY: 12, rotation: -.19, scaleX: 1.3, scaleY: .68, frontHandX: 10, frontHandY: -22, backHandX: 2, backHandY: 2, frontFootX: 17, backFootX: -30 },
@@ -1525,11 +1544,12 @@ const ONESHOT_KEYFRAMES = Object.freeze({
     { t: 1, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   roll: [
-    { t: 0, bodyX: 1, bodyY: 3, rotation: 0, scaleX: 1.04, scaleY: .94, frontHandX: 18, frontHandY: 5, backHandX: -16, backHandY: 6, frontFootX: 15, frontFootLift: 1, backFootX: -15, backFootLift: 1 },
-    { t: .25, bodyX: 3, bodyY: 14, rotation: 1.55, scaleX: 1.18, scaleY: .64, frontHandX: 8, frontHandY: 11, backHandX: -8, backHandY: 11, frontFootX: 8, frontFootLift: 8, backFootX: -8, backFootLift: 8 },
-    { t: .5, bodyX: 4, bodyY: 15, rotation: 3.14, scaleX: 1.2, scaleY: .62, frontHandX: 7, frontHandY: 12, backHandX: -7, backHandY: 12, frontFootX: 7, frontFootLift: 9, backFootX: -7, backFootLift: 9 },
-    { t: .75, bodyX: 3, bodyY: 12, rotation: 4.72, scaleX: 1.14, scaleY: .7, frontHandX: 9, frontHandY: 9, backHandX: -9, backHandY: 9, frontFootX: 9, frontFootLift: 7, backFootX: -9, backFootLift: 7 },
-    { t: 1, bodyX: 1, bodyY: 0, rotation: 6.28, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
+    { t: 0, bodyX: -3, bodyY: 7, rotation: -.12, scaleX: 1.16, scaleY: .79, frontHandX: 19, frontHandY: 7, backHandX: -18, backHandY: 8, frontFootX: 22, backFootX: -24 },
+    { t: .14, bodyX: 5, bodyY: 12, rotation: .48, scaleX: 1.24, scaleY: .67, frontHandX: 14, frontHandY: 13, backHandX: -10, backHandY: 11, frontFootX: 15, frontFootLift: 7, backFootX: -11, backFootLift: 5 },
+    { t: .36, bodyX: 7, bodyY: 16, rotation: 2.15, scaleX: 1.18, scaleY: .62, frontHandX: 7, frontHandY: 12, backHandX: -7, backHandY: 12, frontFootX: 7, frontFootLift: 10, backFootX: -7, backFootLift: 10 },
+    { t: .62, bodyX: 6, bodyY: 15, rotation: 4.15, scaleX: 1.18, scaleY: .63, frontHandX: 7, frontHandY: 12, backHandX: -7, backHandY: 12, frontFootX: 7, frontFootLift: 10, backFootX: -7, backFootLift: 10 },
+    { t: .84, bodyX: 3, bodyY: 9, rotation: 5.75, scaleX: 1.15, scaleY: .76, frontHandX: 20, frontHandY: 4, backHandX: -14, backHandY: 8, frontFootX: 26, backFootX: -21 },
+    { t: 1, bodyX: 0, bodyY: 1, rotation: 6.28, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   crouch: [
     { t: 0 },
@@ -1543,16 +1563,20 @@ const ONESHOT_KEYFRAMES = Object.freeze({
     { t: 1, bodyY: -2, rotation: 6.28, scaleX: .99, scaleY: 1.01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
   ],
   spotDodge: [
-    { t: 0 },
-    { t: .3, bodyX: -10, bodyY: -5, rotation: -.18, scaleX: .8, scaleY: 1.1, frontHandX: 16, frontHandY: -13, backHandX: -10, backHandY: -8, frontFootX: 16, backFootX: -17 },
-    { t: .7, bodyX: -7, bodyY: -3, rotation: -.11, scaleX: .86, scaleY: 1.06, frontHandX: 19, frontHandY: -10, backHandX: -12, backHandY: -5, frontFootX: 16, backFootX: -17 },
-    { t: 1 }
+    { t: 0, bodyX: 0, bodyY: 1, rotation: .02, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 17, backFootX: -17 },
+    { t: .18, bodyX: -7, bodyY: 8, rotation: .16, scaleX: 1.13, scaleY: .8, frontHandX: 12, frontHandY: -14, backHandX: -24, backHandY: 3, frontFootX: 23, backFootX: -25 },
+    { t: .4, bodyX: -15, bodyY: -4, rotation: -.24, scaleX: .83, scaleY: 1.13, frontHandX: 13, frontHandY: -18, backHandX: -9, backHandY: -13, frontFootX: 20, backFootX: -22 },
+    { t: .68, bodyX: -9, bodyY: -2, rotation: -.13, scaleX: .9, scaleY: 1.07, frontHandX: 18, frontHandY: -12, backHandX: -12, backHandY: -6, frontFootX: 19, backFootX: -20 },
+    { t: .86, bodyX: 2, bodyY: 5, rotation: .08, scaleX: 1.09, scaleY: .86, frontHandX: 27, frontHandY: -3, backHandX: -20, backHandY: 5, frontFootX: 22, backFootX: -23 },
+    { t: 1, bodyX: 0, bodyY: 0, rotation: .018, scaleX: 1, scaleY: 1, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
   ],
   airDodge: [
-    { t: 0, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 7, backFootX: -11, backFootLift: 9 },
-    { t: .38, bodyY: -6, rotation: -.13, scaleX: .76, scaleY: 1.16, frontHandX: 9, frontHandY: 7, backHandX: -9, backHandY: 7, frontFootX: 7, frontFootLift: 14, backFootX: -7, backFootLift: 14 },
-    { t: .72, bodyY: -4, rotation: .07, scaleX: .85, scaleY: 1.09, frontHandX: 13, frontHandY: 3, backHandX: -13, backHandY: 4, frontFootX: 9, frontFootLift: 11, backFootX: -9, backFootLift: 12 },
-    { t: 1, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    { t: 0, bodyY: 1, rotation: .02, frontHandX: 27, frontHandY: -4, backHandX: -24, backHandY: 0, frontFootX: 15, frontFootLift: 6, backFootX: -13, backFootLift: 9 },
+    { t: .16, bodyY: -2, rotation: -.08, scaleX: .92, scaleY: 1.06, frontHandX: 18, frontHandY: -10, backHandX: -17, backHandY: -7, frontFootX: 11, frontFootLift: 11, backFootX: -10, backFootLift: 13 },
+    { t: .38, bodyY: -7, rotation: -.18, scaleX: .7, scaleY: 1.2, frontHandX: 7, frontHandY: 8, backHandX: -7, backHandY: 8, frontFootX: 6, frontFootLift: 16, backFootX: -6, backFootLift: 16 },
+    { t: .65, bodyY: -5, rotation: .09, scaleX: .82, scaleY: 1.11, frontHandX: 12, frontHandY: 3, backHandX: -12, backHandY: 4, frontFootX: 8, frontFootLift: 13, backFootX: -8, backFootLift: 14 },
+    { t: .84, bodyY: 0, rotation: .04, scaleX: 1.04, scaleY: .96, frontHandX: 30, frontHandY: 0, backHandX: -27, backHandY: 3, frontFootX: 17, frontFootLift: 6, backFootX: -15, backFootLift: 8 },
+    { t: 1, bodyY: 1, rotation: .015, frontHandX: 26, frontHandY: -5, backHandX: -23, backHandY: -1, frontFootX: 14, frontFootLift: 7, backFootX: -12, backFootLift: 10 }
   ],
   knockdown: [
     { t: 0, bodyY: 13, rotation: 1.45, scaleX: 1.2, scaleY: .64, frontHandX: 28, frontHandY: 12, backHandX: -25, backHandY: 11, frontFootX: 28, backFootX: -25 },
@@ -1772,41 +1796,168 @@ function attackPhaseFrames(profile, phase) {
   return profile.recovery.map((frame, index) => index === 0 ? { ...activeEnd, ...frame } : frame);
 }
 
-function fighterAttackPose(player, pose, motion, phase) {
-  const styled = { ...pose };
-  const active = phase === 'active' ? 1 : phase === 'startup' || phase === 'charge' ? .62 : .34;
+function applyPoseDelta(pose, delta, amount = 1) {
+  const next = { ...pose };
+  for (const key of ['bodyX','bodyY','rotation','frontHandX','frontHandY','backHandX','backHandY','frontFootX','frontFootLift','backFootX','backFootLift']) {
+    if (Number.isFinite(delta[key])) next[key] += delta[key] * amount;
+  }
+  if (Number.isFinite(delta.scaleX)) next.scaleX *= 1 + delta.scaleX * amount;
+  if (Number.isFinite(delta.scaleY)) next.scaleY *= 1 + delta.scaleY * amount;
+  return next;
+}
+
+function fighterStatePose(player, pose, action, progress, age) {
+  const t = clamp(progress, 0, 1);
+  const stride = Math.sin(t * Math.PI * 2);
+  let styled = { ...pose };
   if (player.characterId === 'volt') {
-    styled.bodyX += 4 * active;
-    styled.rotation -= .045 * active;
-    styled.frontHandX += 7 * active;
-    styled.frontFootX += 5 * active;
-    styled.backFootX -= 4 * active;
+    const forward = action === 'walk' ? 1.4 : action === 'run' || action === 'dash' ? 3.5 : 0;
+    styled = applyPoseDelta(styled, {
+      bodyX: forward, rotation: forward * -.012,
+      frontHandX: action === 'run' ? 4 : 0, backFootX: action === 'run' ? -3 : 0
+    });
+    if (action === 'landing') styled = applyPoseDelta(styled, { bodyX: 4 * (1-t), rotation: -.08 * (1-t), frontFootX: 5 * (1-t) });
   } else if (player.characterId === 'blaze') {
-    styled.bodyY += 4 * active;
-    styled.scaleX *= 1 + .1 * active;
-    styled.scaleY *= 1 - .07 * active;
-    styled.frontFootX += 7 * active;
-    styled.backFootX -= 9 * active;
-    styled.backHandX -= 5 * active;
-    if (['hammer','heavyJab','bodyCheck','shoulder','cannon'].includes(motion)) styled.frontHandX += 8 * active;
+    const planted = ['idle','walk','run','landing','groundHit','shield'].includes(action) ? 1 : .5;
+    styled = applyPoseDelta(styled, {
+      bodyY: 2.5 * planted, scaleX: .08 * planted, scaleY: -.055 * planted,
+      frontFootX: 5 * planted, backFootX: -7 * planted,
+      frontHandY: 2 * planted, backHandY: 3 * planted
+    });
+    if (action === 'walk' || action === 'run') styled.bodyY += Math.abs(stride) * 2;
+    if (action === 'landing') styled = applyPoseDelta(styled, { bodyY: 3 * (1-t), frontFootX: 5, backFootX: -5 });
   } else if (player.characterId === 'bolt') {
-    styled.bodyY += 2 * active;
-    styled.rotation += .09 * active;
-    styled.scaleX *= 1 + .06 * active;
-    styled.frontFootX += 9 * active;
-    styled.backFootX -= 6 * active;
+    const spring = ['walk','run','jump','fall','landing'].includes(action) ? 1 : .45;
+    styled = applyPoseDelta(styled, {
+      rotation: stride * .035 * spring, bodyY: -Math.abs(stride) * 1.5 * spring,
+      frontHandY: -stride * 3 * spring, backHandY: stride * 3 * spring,
+      frontFootLift: Math.max(0, stride) * 2 * spring, backFootLift: Math.max(0, -stride) * 2 * spring
+    });
+    if (action === 'landing') styled = applyPoseDelta(styled, { rotation: .1 * (1-t), bodyX: -3 * (1-t) });
+  } else if (player.characterId === 'nova') {
+    const aerial = ['jump','fall','airDodge','airRecover'].includes(action) ? 1 : .45;
+    styled = applyPoseDelta(styled, {
+      bodyY: -2 * aerial, scaleX: -.045 * aerial, scaleY: .065 * aerial,
+      frontHandY: -5 * aerial, backHandY: -3 * aerial,
+      frontFootX: 3 * aerial, backFootX: -4 * aerial
+    });
+    if (action === 'landing') styled = applyPoseDelta(styled, { bodyY: -2 * t, scaleX: -.04 * t, scaleY: .05 * t });
+  }
+
+  if (action === 'hit' || action === 'airRecover') {
+    const vertical = clamp((player.vy || 0) / 520, -1, 1);
+    styled.rotation += vertical * -.16;
+    styled.bodyY += vertical * 4;
+    styled.frontHandY -= vertical * 7;
+    styled.backFootLift += Math.max(0, -vertical) * 6;
+  } else if (action === 'groundHit') {
+    const force = clamp(Math.abs(player.vx || 0) / 480, 0, 1);
+    styled.bodyX += force * 4;
+    styled.frontFootX += force * 5;
+    styled.backFootX -= force * 6;
+  } else if (action === 'airDodge' && !player.dodgeNeutral) {
+    const dodgeX = clamp((player.dodgeStartVx || 0) / 390, -1, 1) * player.face;
+    const dodgeY = clamp((player.dodgeStartVy || 0) / 360, -1, 1);
+    const burst = Math.sin(t * Math.PI);
+    styled.rotation += (-dodgeX * .18 + dodgeY * .12) * burst;
+    styled.bodyX += dodgeX * 6 * burst;
+    styled.bodyY += dodgeY * 5 * burst;
+  }
+  return styled;
+}
+
+function fighterAttackPose(player, pose, action, motion, phase, progress) {
+  const styled = { ...pose };
+  const t = clamp(progress, 0, 1);
+  const phaseWeight = phase === 'active' ? 1 : phase === 'startup' || phase === 'charge' ? .68 : .42 * (1-t);
+  const windup = phase === 'startup' || phase === 'charge' ? t : 0;
+  const active = phase === 'active' ? Math.sin((.18 + t * .82) * Math.PI / 2) : 0;
+  const recoil = phase === 'recovery' ? 1-t : 0;
+  if (player.characterId === 'volt') {
+    styled.bodyX += -4 * windup + 8 * active + 3 * recoil;
+    styled.bodyY += 2 * windup - 2 * active;
+    styled.rotation += .09 * windup - .13 * active;
+    styled.frontHandX += 9 * phaseWeight;
+    styled.frontFootX += 7 * phaseWeight;
+    styled.backFootX -= 6 * phaseWeight;
+    if (action === 'groundDown' || action === 'airDown') {
+      styled.bodyY += 4 * phaseWeight; styled.frontFootX += 8 * phaseWeight; styled.backHandX -= 7 * phaseWeight;
+    } else if (action === 'groundUp' || action === 'airUp') {
+      styled.frontHandY -= 9 * phaseWeight; styled.backHandY -= 5 * phaseWeight; styled.scaleY *= 1 + .06 * phaseWeight;
+    } else if (action === 'airNeutral') {
+      styled.frontFootX += 7 * active; styled.backFootX -= 7 * active; styled.rotation += .12 * active;
+    }
+  } else if (player.characterId === 'blaze') {
+    styled.bodyX += -7 * windup + 10 * active;
+    styled.bodyY += 5 * phaseWeight;
+    styled.rotation += .11 * windup - .1 * active;
+    styled.scaleX *= 1 + .14 * phaseWeight;
+    styled.scaleY *= 1 - .1 * phaseWeight;
+    styled.frontFootX += 9 * phaseWeight;
+    styled.backFootX -= 12 * phaseWeight;
+    styled.backHandX -= 7 * phaseWeight;
+    if (['hammer','heavyJab','bodyCheck','shoulder','cannon'].includes(motion)) {
+      styled.frontHandX += 11 * phaseWeight;
+      styled.backHandX += 7 * active;
+      styled.backHandY = lerp(styled.backHandY, styled.frontHandY + 7, active * .72);
+    }
+    if (action === 'airNeutral') {
+      styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.frontFootX += 8 * active; styled.backFootX -= 8 * active;
+    } else if (action === 'airDown') {
+      styled.frontHandX += 5 * phaseWeight; styled.backHandX -= 5 * phaseWeight; styled.scaleY *= 1 + .1 * active;
+    }
+  } else if (player.characterId === 'bolt') {
+    const twist = phase === 'active' ? Math.sin(t * Math.PI) : windup * -.5;
+    styled.bodyY += 3 * phaseWeight - 3 * active;
+    styled.rotation += .16 * twist;
+    styled.scaleX *= 1 + .08 * phaseWeight;
+    styled.scaleY *= 1 - .05 * phaseWeight;
+    styled.frontFootX += 10 * phaseWeight;
+    styled.backFootX -= 8 * phaseWeight;
+    styled.frontHandY += 7 * twist;
+    styled.backHandY -= 8 * twist;
     if (['wheelSpin','wheelSweep','wheelDrop','roll','quake'].includes(motion)) {
-      styled.frontHandY += 8 * active;
-      styled.backHandY -= 7 * active;
+      styled.frontHandX += 8 * twist;
+      styled.backHandX -= 9 * twist;
+      styled.frontFootLift += 5 * Math.max(0, twist);
+      styled.backFootLift += 5 * Math.max(0, -twist);
+    }
+    if (action === 'groundDown' || action === 'specialDown') {
+      styled.bodyY += 5 * active; styled.frontFootX += 7 * active; styled.backFootX -= 7 * active;
     }
   } else if (player.characterId === 'nova') {
-    styled.bodyY -= 3 * active;
-    styled.scaleX *= 1 - .05 * active;
-    styled.scaleY *= 1 + .08 * active;
-    styled.frontHandY -= 8 * active;
-    styled.backHandX -= 7 * active;
-    styled.frontFootX += 5 * active;
-    styled.backFootX -= 8 * active;
+    styled.bodyX += -3 * windup + 5 * active;
+    styled.bodyY -= 4 * phaseWeight;
+    styled.rotation += -.06 * windup + .08 * active;
+    styled.scaleX *= 1 - .07 * phaseWeight;
+    styled.scaleY *= 1 + .1 * phaseWeight;
+    styled.frontHandY -= 10 * phaseWeight;
+    styled.backHandX -= 9 * phaseWeight;
+    styled.backHandY += 5 * phaseWeight;
+    styled.frontFootX += 6 * phaseWeight;
+    styled.backFootX -= 10 * phaseWeight;
+    if (action === 'groundSide' || action === 'airForward' || motion === 'blink') {
+      styled.frontHandX += 10 * active; styled.backHandX -= 8 * active; styled.frontFootLift += 5 * active;
+    } else if (action === 'groundUp' || action === 'airUp' || motion === 'warp') {
+      styled.frontHandY -= 12 * phaseWeight; styled.backHandY -= 8 * phaseWeight; styled.frontFootX += 3 * active; styled.backFootX -= 3 * active;
+    } else if (action === 'airDown') {
+      styled.frontHandX += 8 * phaseWeight; styled.backHandX -= 8 * phaseWeight; styled.scaleX *= 1 + .08 * active;
+    } else if (motion === 'gravity') {
+      styled.frontHandX += 9 * active; styled.backHandX -= 9 * active; styled.frontHandY += 9 * active; styled.backHandY += 9 * active;
+    }
+  }
+  const authored = window.NEON_MOTION?.profileFor(player.characterId, action);
+  if (!authored) return styled;
+  if (phase === 'startup' || phase === 'charge') {
+    const anticipation = Math.sin(t * Math.PI * .5);
+    return applyPoseDelta(styled, authored.windup, anticipation * .52);
+  }
+  if (phase === 'active') {
+    const contact = 1 - Math.abs(t - .28) / .72;
+    return applyPoseDelta(styled, authored.active, clamp(contact, .42, 1) * .38);
+  }
+  if (phase === 'recovery') {
+    return applyPoseDelta(styled, authored.recovery, (1 - t) * .42);
   }
   return styled;
 }
@@ -1845,14 +1996,15 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
       const poseProgress = phase === 'charge'
         ? .72 + clamp(((player.chargeFrames || 10) - 10) / 80, 0, 1) * .28
         : progress;
-      return fighterAttackPose(player, sampleKeyframes(frames, poseProgress), motion, phase);
+      return fighterAttackPose(player, sampleKeyframes(frames, poseProgress), action, motion, phase, poseProgress);
     }
   }
-  if (action === 'shieldHit') return sampleKeyframes(ONESHOT_KEYFRAMES.shieldHit, clamp(age / .22, 0, 1));
-  if (action === 'parrySuccess') return sampleKeyframes(ONESHOT_KEYFRAMES.parry, clamp(age / .24, 0, 1));
-  if (action === 'dash') return sampleKeyframes(ONESHOT_KEYFRAMES.dash, clamp((player.dashAge || 0) / 16, 0, 1));
-  if (action === 'pivot') return sampleKeyframes(ONESHOT_KEYFRAMES.pivot, clamp((player.dashAge || 0) / 4, 0, 1));
-  if (action === 'brake' || action === 'skid') return sampleKeyframes(ONESHOT_KEYFRAMES.brake, clamp(1 - (player.dashBrakeFrames || 0) / 5, 0, 1));
+  const statePose = (frames, value) => fighterStatePose(player, sampleKeyframes(frames, value), action, value, age);
+  if (action === 'shieldHit') return statePose(ONESHOT_KEYFRAMES.shieldHit, clamp(age / .22, 0, 1));
+  if (action === 'parrySuccess') return statePose(ONESHOT_KEYFRAMES.parry, clamp(age / .24, 0, 1));
+  if (action === 'dash') return statePose(ONESHOT_KEYFRAMES.dash, clamp((player.dashAge || 0) / 16, 0, 1));
+  if (action === 'pivot') return statePose(ONESHOT_KEYFRAMES.pivot, clamp((player.dashAge || 0) / 4, 0, 1));
+  if (action === 'brake' || action === 'skid') return statePose(ONESHOT_KEYFRAMES.brake, clamp(1 - (player.dashBrakeFrames || 0) / 5, 0, 1));
   if (action === 'ledgeCatch') return sampleKeyframes(ONESHOT_KEYFRAMES.ledgeHang, (age / .72) % 1);
   if (['ledgeGetup','ledgeAttackClimb','ledgeRollClimb'].includes(action)) {
     const total = Math.max(1, player.ledgeTransitionTotal || 1);
@@ -1865,19 +2017,19 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
   if (action === 'ledgeJump') return sampleKeyframes(ONESHOT_KEYFRAMES.jump, clamp(age / .2, 0, 1));
   if (action === 'roll' || action === 'techRoll' || action === 'getupRoll' || action === 'ledgeRoll') {
     const total = Math.max(1, player.dodgeTotalFrames || 22);
-    return sampleKeyframes(ONESHOT_KEYFRAMES.roll, clamp((player.dodgeElapsed || 0) / total, 0, 1));
+    return statePose(ONESHOT_KEYFRAMES.roll, clamp((player.dodgeElapsed || 0) / total, 0, 1));
   }
-  if (player.shielding || action === 'shield') return sampleKeyframes(LOOP_KEYFRAMES.shield, (age / .8) % 1);
-  if (action === 'walk') return sampleKeyframes(LOOP_KEYFRAMES.walk, (age / .72) % 1);
-  if (action === 'run') return sampleKeyframes(LOOP_KEYFRAMES.run, (age / .46) % 1);
-  if (action === 'idle') return sampleKeyframes(LOOP_KEYFRAMES.idle, (age / 1.4) % 1);
-  if (action === 'jumpSquat') return sampleKeyframes(ONESHOT_KEYFRAMES.jumpSquat, clamp(age / .09, 0, 1));
-  if (action === 'jump') return sampleKeyframes(ONESHOT_KEYFRAMES.jump, clamp(age / .24, 0, 1));
-  if (action === 'fall' || action === 'freefall') return sampleKeyframes(ONESHOT_KEYFRAMES.fall, (age / .8) % 1);
-  if (action === 'landing') return sampleKeyframes(ONESHOT_KEYFRAMES.landing, clamp(age / .2, 0, 1));
-  if (action === 'groundHit') return sampleKeyframes(ONESHOT_KEYFRAMES.groundHit, clamp(age / .24, 0, 1));
-  if (action === 'hit' || action === 'airRecover') return sampleKeyframes(ONESHOT_KEYFRAMES.hit, clamp(age / .28, 0, 1));
-  if (action === 'tumble') return sampleKeyframes(LOOP_KEYFRAMES.tumble, (age / .42) % 1);
+  if (player.shielding || action === 'shield') return statePose(LOOP_KEYFRAMES.shield, (age / .8) % 1);
+  if (action === 'walk') return statePose(LOOP_KEYFRAMES.walk, (age / .72) % 1);
+  if (action === 'run') return statePose(LOOP_KEYFRAMES.run, (age / .46) % 1);
+  if (action === 'idle') return statePose(LOOP_KEYFRAMES.idle, (age / 1.4) % 1);
+  if (action === 'jumpSquat') return statePose(ONESHOT_KEYFRAMES.jumpSquat, clamp(age / .09, 0, 1));
+  if (action === 'jump') return statePose(ONESHOT_KEYFRAMES.jump, clamp(age / .24, 0, 1));
+  if (action === 'fall' || action === 'freefall') return statePose(ONESHOT_KEYFRAMES.fall, (age / .8) % 1);
+  if (action === 'landing') return statePose(ONESHOT_KEYFRAMES.landing, clamp(age / .2, 0, 1));
+  if (action === 'groundHit') return statePose(ONESHOT_KEYFRAMES.groundHit, clamp(age / .24, 0, 1));
+  if (action === 'hit' || action === 'airRecover') return statePose(ONESHOT_KEYFRAMES.hit, clamp(age / .28, 0, 1));
+  if (action === 'tumble') return statePose(LOOP_KEYFRAMES.tumble, (age / .42) % 1);
   if (action === 'crawl') {
     const pose = sampleKeyframes(ONESHOT_KEYFRAMES.crouch, 1);
     const stride = Math.sin(age / .34 * Math.PI * 2);
@@ -1888,11 +2040,11 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
     pose.backFootX -= stride * 7;
     return pose;
   }
-  if (action === 'crouch') return sampleKeyframes(ONESHOT_KEYFRAMES.crouch, clamp(age / .12, 0, 1));
-  if (action === 'spotDodge') return sampleKeyframes(ONESHOT_KEYFRAMES.spotDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 24), 0, 1));
-  if (action === 'airDodge') return sampleKeyframes(ONESHOT_KEYFRAMES.airDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 44), 0, 1));
-  if (action === 'knockdown') return sampleKeyframes(ONESHOT_KEYFRAMES.knockdown, 1);
-  if (action === 'getup' || action === 'tech') return sampleKeyframes(ONESHOT_KEYFRAMES.getup, clamp(age / .3, 0, 1));
+  if (action === 'crouch') return statePose(ONESHOT_KEYFRAMES.crouch, clamp(age / .12, 0, 1));
+  if (action === 'spotDodge') return statePose(ONESHOT_KEYFRAMES.spotDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 24), 0, 1));
+  if (action === 'airDodge') return statePose(ONESHOT_KEYFRAMES.airDodge, clamp((player.dodgeElapsed || 0) / Math.max(1, player.dodgeTotalFrames || 44), 0, 1));
+  if (action === 'knockdown') return statePose(ONESHOT_KEYFRAMES.knockdown, 1);
+  if (action === 'getup' || action === 'tech') return statePose(ONESHOT_KEYFRAMES.getup, clamp(age / .3, 0, 1));
   if (action === 'grabHold') return sampleKeyframes(ONESHOT_KEYFRAMES.grabHold, (age / .55) % 1);
   if (action === 'grabbed' || action === 'grabbedHit') return sampleKeyframes(ONESHOT_KEYFRAMES.grabbed, (age / .42) % 1);
   if (action === 'grabEscape') return sampleKeyframes(ONESHOT_KEYFRAMES.grabEscape, clamp(age / .2, 0, 1));
@@ -2425,8 +2577,9 @@ function drawPlayer(p, dt) {
   const fighter = FIGHTERS.find(item => item.id === p.characterId) || FIGHTERS[0];
   const color = fighter.palettes[p.palette % fighter.palettes.length];
   const hitFlash = p.flashUntil > performance.now();
+  const impactCue = p.impactVisualUntil > performance.now();
   const invincibleFlash = p.invincible > 0 && Math.floor(p.invincible / 3) % 2;
-  const fullBodyFlash = hitFlash || invincibleFlash;
+  const fullBodyFlash = invincibleFlash;
   const renderColor = fullBodyFlash ? '#ffffff' : color;
   const action = displayedAction(p);
   if (p.keyframeAction !== action) {
@@ -2488,7 +2641,7 @@ function drawPlayer(p, dt) {
   const doubleJumpActive = p.visualDoubleJumpAge < 1 && !attack && p.stun <= 0 && p.hitstop <= 0;
   const doubleJumpProgress = doubleJumpActive ? p.visualDoubleJumpAge * p.visualDoubleJumpAge * (3 - 2 * p.visualDoubleJumpAge) : 0;
   const doubleJumpTuck = doubleJumpActive ? Math.sin(doubleJumpProgress * Math.PI) : 0;
-  if (doubleJumpActive) keyPose = sampleKeyframes(ONESHOT_KEYFRAMES.doubleJump, doubleJumpProgress);
+  if (doubleJumpActive) keyPose = fighterStatePose(p, sampleKeyframes(ONESHOT_KEYFRAMES.doubleJump, doubleJumpProgress), 'jump', doubleJumpProgress, p.visualDoubleJumpAge);
   let scaleX = 1, scaleY = 1, rotation = 0, bodyX = 0, bodyY = bob;
   if (attack) {
     const anticipation = smashPose ? 1.45 : tiltPose ? .78 : 1;
@@ -2645,6 +2798,14 @@ function drawPlayer(p, dt) {
     scaleY = keyPose.scaleY;
   }
   if (p.hitstop > 0) { scaleX *= 1.08; scaleY *= .92; bodyY -= 2; }
+  if (impactCue && (action === 'hit' || action === 'groundHit' || action === 'grabbedHit')) {
+    const strength = clamp(Number(p.impactVisualStrength) || .5, .35, 1.55);
+    const direction = Math.cos(Number(p.impactVisualAngle) || 0);
+    scaleX *= 1 + .065 * strength;
+    scaleY *= 1 - .045 * strength;
+    bodyX += direction * 4.5 * strength;
+    rotation += direction * .055 * strength;
+  }
   if (p.grounded) bodyY += p.height / 2 * (1 - scaleY);
   const targetPose={scaleX,scaleY,rotation,bodyX,bodyY};
   const pose=p.visualPose||={...targetPose};
@@ -2655,7 +2816,7 @@ function drawPlayer(p, dt) {
     p.visualAction = action;
     p.visualActionAge = 0;
   } else p.visualActionAge = (p.visualActionAge || 0) + dt;
-  const poseRate=p.hitstop>0?90:keyPose?96:doubleJumpActive?72:action==='groundHit'?62:spinning?38:rolling?36:enteredActive?72:phase==='active'?58:phase==='startup'?34:phase==='recovery'?30:attack?26:22,poseMix=1-Math.exp(-Math.max(.001,dt)*poseRate);
+  const poseRate=p.hitstop>0?96:enteredActive?110:phase==='active'?76:phase==='startup'||phase==='charge'?32:phase==='recovery'?25:action==='groundHit'||action==='hit'?72:doubleJumpActive?58:spinning?38:rolling?48:keyPose?42:attack?26:22,poseMix=1-Math.exp(-Math.max(.001,dt)*poseRate);
   for(const key of Object.keys(targetPose))pose[key]=lerp(pose[key],targetPose[key],poseMix);
   if (doubleJumpActive) pose.rotation = rotation;
   else if (doubleJumpEnded) pose.rotation = 0;
@@ -2838,15 +2999,17 @@ function drawPlayer(p, dt) {
   }
   if (phase === 'active' && legStrike && p.strikePoints?.length) {
     const primaryHipX = action === 'airBack' ? -p.face * 6 : p.face * 6;
-    const primary = limitLimb(primaryHipX, hipY, localStrikePoint(p.strikePoints[0]), 82);
+    const legReach = fighter.id === 'blaze' ? 62 : fighter.id === 'bolt' ? 59 : 57;
+    const primary = limitLimb(primaryHipX, hipY, localStrikePoint(p.strikePoints[0]), legReach);
     if (action === 'airBack') { backFootX = primary.x; backFootY = primary.y; }
     else { frontFootX = primary.x; frontFootY = primary.y; }
     if (p.strikePoints[1]) {
-      const secondary = limitLimb(-p.face * 6, hipY, localStrikePoint(p.strikePoints[1]), 82);
+      const secondary = limitLimb(-p.face * 6, hipY, localStrikePoint(p.strikePoints[1]), legReach);
       backFootX = secondary.x; backFootY = secondary.y;
     }
   }
-  const targetFeet={frontFootX,frontFootY,backFootX,backFootY},feet=p.visualFeet||={...targetFeet},feetMix=1-Math.exp(-Math.max(.001,dt)*(p.hitstop>0||action==='groundHit'?90:keyPose?108:enteredActive?110:phase==='active'?72:phase==='startup'?38:phase==='recovery'?28:22));
+  const feetRate=p.hitstop>0||action==='groundHit'?94:enteredActive?114:phase==='active'?76:phase==='startup'||phase==='charge'?34:phase==='recovery'?27:rolling?52:keyPose?48:22;
+  const targetFeet={frontFootX,frontFootY,backFootX,backFootY},feet=p.visualFeet||={...targetFeet},feetMix=1-Math.exp(-Math.max(.001,dt)*feetRate);
   for(const key of Object.keys(targetFeet))feet[key]=lerp(feet[key],targetFeet[key],feetMix);
   ({frontFootX,frontFootY,backFootX,backFootY}=feet);
   const frontKnee=[(p.face*6+frontFootX)*.5+p.face*4,(hipY+frontFootY)*.5];
@@ -2954,14 +3117,16 @@ function drawPlayer(p, dt) {
   }
   if (phase === 'active' && p.strikePoints?.length && !legStrike) {
     const shoulderY = bodyCenterY - 2;
-    const primary = limitLimb(p.face * 6, shoulderY, localStrikePoint(p.strikePoints[0]), 82);
+    const armReach = fighter.id === 'blaze' ? 56 : fighter.id === 'nova' ? 52 : 50;
+    const primary = limitLimb(p.face * 6, shoulderY, localStrikePoint(p.strikePoints[0]), armReach);
     frontX = primary.x; frontY = primary.y - bodyCenterY;
     if (p.strikePoints[1]) {
-      const secondary = limitLimb(-p.face * 6, shoulderY, localStrikePoint(p.strikePoints[1]), 82);
+      const secondary = limitLimb(-p.face * 6, shoulderY, localStrikePoint(p.strikePoints[1]), armReach);
       backX = secondary.x; backY = secondary.y - bodyCenterY;
     }
   }
-  const targetArms={frontX,frontY,backX,backY},arms=p.visualArms||={...targetArms},armMix=1-Math.exp(-Math.max(.001,dt)*(p.hitstop>0||action==='groundHit'?96:keyPose?116:enteredActive?116:phase==='active'?76:phase==='startup'?40:phase==='recovery'?30:23));
+  const armRate=p.hitstop>0||action==='groundHit'?100:enteredActive?120:phase==='active'?82:phase==='startup'||phase==='charge'?36:phase==='recovery'?28:rolling?54:keyPose?50:23;
+  const targetArms={frontX,frontY,backX,backY},arms=p.visualArms||={...targetArms},armMix=1-Math.exp(-Math.max(.001,dt)*armRate);
   for(const key of Object.keys(targetArms))arms[key]=lerp(arms[key],targetArms[key],armMix);
   ({frontX,frontY,backX,backY}=arms);
   if (p.chargeFrames > 0) {
@@ -3237,19 +3402,6 @@ function drawKoCinematics(){
     ctx.restore();
   }
 }
-function drawHitLinks(){
-  ctx.save();ctx.lineCap='round';
-  for(const link of hitLinks){
-    const fade=clamp(link.life/link.duration,0,1),travel=1-fade;
-    const startX=lerp(link.fromX,link.toX,travel*.55),startY=lerp(link.fromY,link.toY,travel*.55);
-    ctx.globalAlpha=fade*(link.critical?.82:.58);ctx.strokeStyle=link.color;
-    ctx.lineWidth=link.critical?4:2.5;ctx.shadowColor=link.color;ctx.shadowBlur=link.critical?8:3;
-    ctx.beginPath();ctx.moveTo(startX,startY);ctx.lineTo(link.toX,link.toY);ctx.stroke();
-    ctx.shadowBlur=0;ctx.fillStyle='#ffffff';ctx.globalAlpha=fade*.9;
-    ctx.beginPath();ctx.arc(link.toX,link.toY,link.critical?5:3,0,Math.PI*2);ctx.fill();
-  }
-  ctx.restore();
-}
 function burst(x,y,color,count,speed,direction=0,scale=1){const densityScale=particles.length>48?.36:particles.length>30?.64:1,drawCount=Math.max(2,Math.ceil(count*effectQuality*densityScale));for(let i=0;i<drawCount;i++){const forward=i<drawCount*.66,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?1.8:2.55),s=speed*(.3+Math.random()*.82),duration=.19+Math.random()*.15;particles.push({x:x+(Math.random()-.5)*7,y:y+(Math.random()-.5)*7,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%4===0?color:'#ffffff',size:(1.8+Math.random()*2.5)*scale,gravity:42+Math.random()*65});}if(particles.length>64)particles.splice(0,particles.length-64);}
 function drawParticles(){ctx.save();for(const p of particles){const fade=clamp(p.life/p.duration,0,1),size=Math.max(1.6,p.size*(.48+fade*.52));ctx.globalAlpha=Math.min(1,fade*fade*1.12);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(Math.round(p.x),Math.round(p.y),size*.52,0,Math.PI*2);ctx.fill();}ctx.restore();}
 function drawBlastMarks(){for(const mark of blastMarks){const fade=clamp(mark.life/mark.duration,0,1),expand=.72+(1-fade)*.28;ctx.save();ctx.translate(mark.x,mark.y);ctx.globalAlpha=fade*.28;ctx.fillStyle=mark.color;ctx.strokeStyle='#ffffff';ctx.lineWidth=3;ctx.shadowColor=mark.color;ctx.shadowBlur=10;ctx.beginPath();for(let i=0;i<16;i++){const a=-Math.PI/2+i*Math.PI/8,r=mark.radius*expand*(i%2?.84:1);i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}ctx.closePath();ctx.fill();ctx.globalAlpha=fade*.8;ctx.stroke();ctx.restore();}}
@@ -3296,7 +3448,7 @@ function drawShieldBreakEffects(){
 }
 function drawImpactRings(){for(const ring of impactRings){const fade=clamp(ring.life/ring.duration,0,1),burst=1-fade,radius=ring.radius*(.62+burst*.9);ctx.save();ctx.translate(ring.x,ring.y);ctx.globalAlpha=fade*.8;ctx.strokeStyle=ring.color;ctx.lineWidth=2.5+fade*4;ctx.shadowBlur=effectQuality<.78?0:4;ctx.shadowColor=ring.color;ctx.beginPath();ctx.arc(0,0,radius,0,Math.PI*2);ctx.stroke();if(effectQuality>=.68){ctx.globalAlpha*=.35;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,radius*.58,0,Math.PI*2);ctx.stroke();}ctx.restore();}}
 function drawTrails(){for(const trail of trails){if(!trail.launch)continue;ctx.save();ctx.translate(trail.x,trail.y);const speed=Math.hypot(trail.vx,trail.vy),length=clamp(speed*(trail.finisher?.19:.14),58,trail.finisher?178:132);ctx.rotate(Math.atan2(trail.vy,trail.vx));const gradient=ctx.createLinearGradient(-length,0,4,0);gradient.addColorStop(0,'rgba(255,255,255,0)');gradient.addColorStop(trail.finisher?.55:.72,trail.color);gradient.addColorStop(1,'rgba(255,255,255,.9)');ctx.globalAlpha=trail.life*(trail.finisher?2.8:2.25);ctx.strokeStyle=gradient;ctx.lineWidth=clamp(speed/(trail.finisher?125:155),trail.finisher?5:3,trail.finisher?9:6);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-length,0);ctx.lineTo(4,0);ctx.stroke();if(trail.finisher){ctx.globalAlpha*=.75;ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-length*.72,0);ctx.lineTo(5,0);ctx.stroke();}ctx.restore();}}
-function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const link of hitLinks)link.life-=dt;hitLinks=hitLinks.filter(link=>link.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of shieldBreakEffects)effect.life-=dt;shieldBreakEffects=shieldBreakEffects.filter(effect=>effect.life>0);for(const image of dashAfterimages)image.life-=dt;dashAfterimages=dashAfterimages.filter(image=>image.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
+function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of shieldBreakEffects)effect.life-=dt;shieldBreakEffects=shieldBreakEffects.filter(effect=>effect.life>0);for(const image of dashAfterimages)image.life-=dt;dashAfterimages=dashAfterimages.filter(image=>image.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
 
 function loop(now){
   requestAnimationFrame(loop);
@@ -3421,10 +3573,90 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAllI
 document.querySelector('#sound-button').addEventListener('click',event=>{muted=!muted;event.currentTarget.textContent=muted?'×':'♪';});
 function ensureAudio(){audio||=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();}
 function beep(freq,duration,type){if(muted)return;ensureAudio();const oscillator=audio.createOscillator(),gain=audio.createGain();oscillator.type=type;oscillator.frequency.value=freq;gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);oscillator.connect(gain).connect(audio.destination);oscillator.start();oscillator.stop(audio.currentTime+duration);}
+function impactSound(strength, options = {}) {
+  if (muted) return;
+  ensureAudio();
+  const amount = clamp(Number(strength) || .5, .35, 1.55);
+  const duration = options.critical ? .14 : options.pummel ? .035 : .045 + amount * .025;
+  const startFrequency = options.shield ? 330 : options.critical ? 92 : 205 - amount * 62;
+  const endFrequency = options.shield ? 185 : options.critical ? 38 : Math.max(48, startFrequency * .42);
+  const oscillator = audio.createOscillator(), gain = audio.createGain();
+  oscillator.type = options.shield ? 'triangle' : options.sweet ? 'square' : 'sawtooth';
+  oscillator.frequency.setValueAtTime(startFrequency, audio.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(endFrequency, audio.currentTime + duration);
+  gain.gain.setValueAtTime(Math.min(.065, .024 + amount * .018), audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration);
+  oscillator.connect(gain).connect(audio.destination);
+  oscillator.start();
+  oscillator.stop(audio.currentTime + duration);
+}
 function clamp(value,min,max){return Math.max(min,Math.min(max,value));}
 function playerTag(player){
   if(player?.clientId?.startsWith('cpu:'))return player.nickname||'BOT';
   return player?.nickname||room?.players?.find(slot=>slot.clientId===player?.clientId)?.nickname||`P${player.i+1}`;
 }
 function formatTime(ticks){if(rules.mode==='training')return '∞';const seconds=Math.max(0,Math.ceil(ticks/60));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;}
+
+if (new URLSearchParams(location.search).get('visualTest') === '1') {
+  window.__NEON_SET_VISUAL_FIXTURE__ = (fixture = 'motion-grid') => {
+    const makePlayer = (fighter, index, x, action, options = {}) => {
+      const move = fighter.moves[action] || {};
+      const y = 500 - fighter.height / 2, direction = options.face || 1;
+      const strikePoints = action === 'groundHit' || move.projectileOnly || move.trapOnly
+        ? []
+        : action.includes('Up')
+          ? [{ x: x + direction * 7, y: y - Math.min(54, (move.reachY || 90) * .52) }]
+          : action.includes('Down')
+            ? [{ x: x + direction * Math.min(48, (move.reachX || 80) * .48), y: y + fighter.height * .3 }]
+            : [{ x: x + direction * Math.min(52, (move.reachX || 80) * .52), y: y - 5 }];
+      return {
+        i: index, clientId: `fixture:${fighter.id}`, nickname: fighter.name,
+        characterId: fighter.id, palette: index, team: null,
+        x, y, vx: options.vx || 0, vy: options.vy || 0,
+        face: direction, width: fighter.width, height: fighter.height,
+        grounded: true, platformId: 'main', jumps: 2, damage: 35 + index * 17,
+        stocks: 3, score: 0, shield: SHIELD_MAX, shielding: false, invincible: 0,
+        eliminated: false, respawn: 0, respawnPlatformFrames: 0,
+        actionName: action, actionPhase: options.phase ?? (action === 'groundHit' ? null : 'active'),
+        actionVariant: options.variant || null, actionMotion: move.motion || null,
+        actionFrame: options.actionFrame || move.startup || 0,
+        actionTiming: { startup: move.startup || 1, active: move.active || 1, recovery: move.recovery || 1 },
+        phaseProgress: options.progress ?? .28, actionHitbox: null, strikePoints,
+        chargeFrames: options.chargeFrames || 0, chargeScale: 1,
+        stun: action === 'groundHit' ? 12 : 0, hitstop: options.hitstop || 0,
+        movementState: 'idle', dashFrames: 0, dashAge: 0, dashDirection: 0,
+        dodgeFrames: 0, dodgeTotalFrames: 0, dodgeElapsed: 0,
+        ledge: null, grabbedBy: null, grabbing: null, landingLag: 0,
+        tumbling: false, freefall: false, knockdownFrames: 0,
+        ultimateMeter: 45 + index * 12,
+        impactVisualUntil: action === 'groundHit' ? Number.POSITIVE_INFINITY : 0,
+        impactVisualStrength: options.impactStrength || 1,
+        impactVisualAngle: options.impactAngle || 0
+      };
+    };
+    visualFixtureActive = true;
+    state = 'fixture'; rules = { ...DEFAULT_RULES, mode: 'stock', stocks: 3, timeSeconds: 420 };
+    stage = STAGES[0]; platforms = stage.platforms.map(platform => ({ ...platform }));
+    entities = []; items = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = [];
+    camera = { x: 640, y: 390, zoom: fixture === 'four-player-impact' ? 1.12 : .94 };
+    menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
+    countdown.classList.add('hidden'); trainingPanel.classList.add('hidden'); game.classList.remove('hidden');
+    if (fixture === 'four-player-impact') {
+      players = [
+        makePlayer(FIGHTERS[0], 0, 535, 'groundSide', { face: 1, progress: .25 }),
+        makePlayer(FIGHTERS[1], 1, 615, 'groundHit', { face: -1, impactAngle: 0, impactStrength: 1.3 }),
+        makePlayer(FIGHTERS[2], 2, 685, 'groundDown', { face: -1, progress: .35 }),
+        makePlayer(FIGHTERS[3], 3, 755, 'groundHit', { face: 1, impactAngle: Math.PI, impactStrength: .85 })
+      ];
+    } else {
+      players = [
+        makePlayer(FIGHTERS[0], 0, 275, 'groundSide', { progress: .28 }),
+        makePlayer(FIGHTERS[1], 1, 515, 'groundUp', { progress: .25 }),
+        makePlayer(FIGHTERS[2], 2, 755, 'groundDown', { face: -1, progress: .32 }),
+        makePlayer(FIGHTERS[3], 3, 995, 'specialNeutral', { face: -1, progress: .3 })
+      ];
+    }
+    return { fixture, players: players.length };
+  };
+}
 function escapeHtml(value){return String(value).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));}

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0-beta.7
+
+- Moved fighter move silhouettes into `motion-data.js` with distinct windup, contact, and recovery profiles for every normal, aerial, and special.
+- Strengthened hit readability through pose recoil and impact-weighted sound without adding particles, blur, or extra combat overlays.
+- Added input ACK latency, prediction correction distance, correction peaks, and hard-correction counters to runtime metrics.
+- Changed superseded input frames to volatile delivery so stale input does not accumulate behind transport backpressure.
+- Added deterministic Canvas visual fixtures and screenshot regression coverage for fighter motion and four-player overlap.
+- Split reusable network quality tracking into `network-quality.js` with deterministic Node tests.
+
+## 1.1.0-beta.6
+
+- Rebuilt jump, fall, landing, hit, roll, spot-dodge, and air-dodge keyframe timing around anticipation, contact, recoil, and recovery.
+- Added fighter-specific weight signatures to locomotion and state poses.
+- Removed corner brackets, attacker-to-target link lines, and contact dots; hit reactions now rely on pose, hitstop, and compact particles.
+- Added fighter-, action-, and phase-specific attack silhouettes instead of uniform pose offsets.
+- Changed animation blending so startup and recovery connect smoothly while active hit frames remain crisp.
+- Preserved fighter palette identity during hit flashes and added compact victim corner markers.
+- Capped strike-point limb solving to human proportions while keeping actual impact positions readable through hit links.
+
 ## 1.1.0-beta.5
 
 - Kept the authoritative simulation at 60Hz while reducing full-state broadcasts to 30Hz.

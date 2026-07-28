@@ -32,6 +32,26 @@ test('main UI stays inside desktop and mobile viewports', async ({ browser, base
   }
 });
 
+test('fighter silhouettes and four-player impacts stay visually readable', async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`${baseURL}/?visualTest=1`);
+  await page.waitForFunction(() => typeof window.__NEON_SET_VISUAL_FIXTURE__ === 'function');
+
+  await page.evaluate(() => window.__NEON_SET_VISUAL_FIXTURE__('motion-grid'));
+  await page.waitForTimeout(450);
+  await expect(page.locator('#game')).toHaveScreenshot('combat-motion-grid.png', {
+    animations: 'disabled',
+    maxDiffPixelRatio: 0.012
+  });
+
+  await page.evaluate(() => window.__NEON_SET_VISUAL_FIXTURE__('four-player-impact'));
+  await page.waitForTimeout(450);
+  await expect(page.locator('#game')).toHaveScreenshot('combat-four-player-impact.png', {
+    animations: 'disabled',
+    maxDiffPixelRatio: 0.012
+  });
+});
+
 test('four browsers can create, join, ready, play, reconnect, and keep render budgets', async ({ browser, baseURL }) => {
   const clients = [];
   try {
@@ -95,6 +115,10 @@ test('high latency, jitter, and light packet loss keep prediction and interpolat
     await page.locator('#bot-match-button').click();
     await expect(page.locator('#game')).toBeVisible();
     await page.waitForTimeout(3_200);
+    await page.keyboard.down('ArrowRight');
+    await page.waitForTimeout(420);
+    await page.keyboard.up('ArrowRight');
+    await page.waitForTimeout(500);
     const moderate = await page.evaluate(() => window.__NEON_METRICS__);
 
     await network.send('Network.emulateNetworkConditions', {
@@ -109,6 +133,13 @@ test('high latency, jitter, and light packet loss keep prediction and interpolat
 
     expect(moderate.fps).toBeGreaterThanOrEqual(40);
     expect(stressed.fps).toBeGreaterThanOrEqual(40);
+    expect(moderate.inputAckMs).toBeGreaterThan(0);
+    expect(stressed.inputAckMs).toBeGreaterThan(0);
+    // WebSocket/TCP retransmission can spike ACK delay under synthetic packet
+    // loss; prediction must keep the rendered correction bounded meanwhile.
+    expect(stressed.inputAckMs).toBeLessThan(2_200);
+    expect(stressed.correctionPx).toBeLessThan(90);
+    expect(stressed.correctionPeakPx).toBeLessThan(220);
     expect(stressed.snapshotHz).toBeGreaterThanOrEqual(10);
     expect(stressed.interpolationMs).toBeGreaterThanOrEqual(moderate.interpolationMs);
     expect(stressed.interpolationMs).toBeLessThanOrEqual(150);
