@@ -64,7 +64,7 @@ test('fighter normals have distinct frame signatures, motion identities, and arc
   assert.ok(byId.blaze.weight < byId.volt.weight * 1.3, 'weight gap should not dominate launch outcomes');
   assert.ok(byId.volt.moves.specialNeutral.projectileCooldown >= 40);
   assert.ok(byId.nova.air <= 1.16);
-  assert.ok(byId.bolt.moves.specialSide.recovery >= 18);
+  assert.ok(byId.bolt.moves.specialSide.recovery >= 17);
 });
 
 test('each fighter special kit exposes four distinct behaviors and animations', () => {
@@ -1178,6 +1178,7 @@ test('balance pass keeps armored power and mobility rewards in separate fighter 
   const byId = Object.fromEntries(FIGHTERS.map(fighter => [fighter.id, fighter]));
   assert.equal(byId.blaze.moves.groundSide.armor, undefined);
   assert.ok(byId.blaze.weight <= 1.1);
+  assert.ok(byId.blaze.crowdWeight >= 1.1);
   assert.ok(byId.blaze.moves.specialSide.damage <= 17);
   assert.ok(byId.blaze.moves.specialSide.kx <= 450);
   assert.ok(byId.blaze.moves.specialSide.armorThreshold <= 9);
@@ -1191,11 +1192,27 @@ test('balance pass keeps armored power and mobility rewards in separate fighter 
   assert.ok(byId.volt.moves.specialSide.recovery >= 17);
   assert.ok(byId.volt.moves.groundSide.damage >= 10);
   assert.ok(byId.volt.moves.specialNeutral.chainRadius <= 80);
+  assert.ok(byId.volt.moves.specialNeutral.projectileCooldown >= 48);
+  assert.ok(byId.volt.moves.groundNeutral.recovery >= 5);
+  assert.ok(byId.volt.moves.groundJab2.recovery >= 5);
+  assert.ok(byId.blaze.moves.dashAttack.startup <= 7);
+  assert.ok(byId.blaze.moves.dashAttack.recovery <= 19);
+  assert.equal(byId.blaze.moves.dashAttack.armorType, 'heavy');
+  assert.ok(byId.blaze.moves.dashAttack.crowdArmorThreshold >= 12);
+  assert.ok(byId.blaze.moves.dashAttack.crowdArmorStartupFrames >= 4);
+  assert.ok(byId.blaze.moves.airNeutral.startup <= 7);
+  assert.ok(byId.blaze.moves.airNeutral.landingLag <= 11);
+  assert.equal(byId.blaze.moves.airNeutral.armorType, 'heavy');
+  assert.ok(byId.blaze.moves.airNeutral.crowdArmorThreshold >= 10);
+  assert.ok(byId.blaze.moves.airNeutral.crowdArmorStartupFrames >= 4);
   assert.ok(byId.bolt.moves.specialSide.kx <= 390);
+  assert.ok(byId.bolt.moves.specialSide.recovery <= 17);
   assert.ok(byId.bolt.moves.specialSide.knockbackGrowth <= 1.03);
   assert.ok(byId.bolt.moves.specialDown.damage <= 12);
+  assert.ok(byId.bolt.moves.specialDown.startup <= 9);
   assert.ok(byId.bolt.moves.specialDown.reachX <= 105);
   assert.ok(byId.bolt.moves.specialNeutral.returnDamageScale <= .65);
+  assert.ok(byId.bolt.moves.specialNeutral.crowdDamageScale <= .84);
   assert.ok(byId.bolt.moves.specialUp.riseHorizontal >= 200);
   assert.ok(byId.bolt.speed >= 1.06);
   assert.ok(byId.bolt.air >= 1.04);
@@ -1206,7 +1223,12 @@ test('balance pass keeps armored power and mobility rewards in separate fighter 
   assert.ok(byId.bolt.moves.airForward.knockbackGrowth >= 1.04);
   assert.ok(byId.bolt.moves.airBack.knockbackGrowth >= 1.08);
   assert.equal(byId.nova.moves.specialNeutral.maxActiveProjectiles, 1);
-  assert.ok(byId.nova.moves.airBack.knockbackGrowth >= 1.08);
+  assert.ok(byId.nova.moves.specialNeutral.projectileCooldown >= 48);
+  assert.ok(byId.nova.moves.specialDown.trapLife <= 120);
+  assert.ok(byId.nova.moves.specialDown.pullStrength <= .68);
+  assert.ok(byId.nova.weight <= .92);
+  assert.ok(byId.nova.air <= 1.1);
+  assert.ok(byId.nova.moves.airBack.knockbackGrowth <= 1.05);
   assert.ok(byId.nova.moves.specialSide.recovery >= 18);
   assert.ok(byId.nova.moves.specialSide.knockbackGrowth <= 1.06);
   assert.ok(byId.nova.moves.specialSide.teleport <= 110);
@@ -1649,6 +1671,25 @@ test('six consecutive ledge grabs exhaust ledge access until landing', () => {
   player.x = platform.x + platform.w / 2; player.y = platform.y - player.height / 2 - 2; player.vy = 180;
   stepWorld(world, { 0: frame(2), 1: frame(2) });
   assert.equal(player.grounded, true); assert.equal(player.ledgeGrabs, 0);
+});
+
+test('ledge hanging times out after five seconds and cannot instantly regrab', () => {
+  const world = worldWith(), player = world.players[0], platform = world.platforms[0];
+  player.grounded = false; player.platformId = null; player.invincible = 0; player.ledgeCatchFrames = 0;
+  player.ledge = { platformId: platform.id, x: platform.x, y: platform.y, face: 1 };
+  player.x = platform.x - 16; player.y = platform.y + 20; player.face = 1;
+
+  for (let seq = 1; seq < 300; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.ok(player.ledge, 'fighter should still hang before the authored timeout');
+  stepWorld(world, { 0: frame(300), 1: frame(300) });
+  assert.equal(player.ledge, null);
+  assert.equal(player.actionName, 'fall');
+  assert.ok(player.ledgeGrabLockFrames >= 45);
+  assert.ok(world.events.some(event => event.type === 'ledge-timeout' && event.player === player.i));
+
+  player.x = platform.x + 3; player.y = platform.y + 5; player.vx = 0; player.vy = 100;
+  stepWorld(world, { 0: frame(301), 1: frame(301) });
+  assert.equal(player.ledge, null, 'timeout lock should prevent an immediate ledge regrab loop');
 });
 
 test('ledge catch has two vulnerable frames and exposes all five recovery options', () => {
@@ -2785,7 +2826,7 @@ test('late recovery input chains into the next action', () => {
   player.actionName = 'groundNeutral';
   stepWorld(world, { 0: frame(1, BUTTONS.ATTACK), 1: frame(1) });
   for (let seq = 2; seq <= 6; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
-  assert.ok(player.action); assert.equal(player.action.name, 'groundJab2'); assert.ok(player.action.frame <= 3);
+  assert.ok(player.action); assert.equal(player.action.name, 'groundJab2'); assert.ok(player.action.frame <= 4);
 });
 
 test('late ultimate pre-input executes once while an early buffer expires cleanly', () => {
@@ -2886,6 +2927,104 @@ test('CPU recovery aims toward the stage and spends up special before falling ou
   assert.equal(cpu.action?.name, 'specialUp');
 });
 
+test('CPU recovery prefers its air jump, targets solid ledges, and returns on every stage', () => {
+  for (const stage of STAGES) {
+    for (const fighter of FIGHTERS) {
+      const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: stage.id }, seed: 91, cpu: 'hard', roster: [
+        { slot: 0, clientId: 'human', characterId: 'volt' },
+        { slot: 1, clientId: `cpu:${fighter.id}`, characterId: fighter.id }
+      ] });
+      world.phase = 'active'; world.countdown = 0;
+      const human = world.players[0], cpu = world.players[1];
+      const solid = world.platforms.filter(platform => !platform.passThrough).sort((a, b) => b.w - a.w)[0];
+      human.x = solid.x + solid.w / 2; human.y = solid.y - human.height / 2; human.grounded = true;
+      cpu.x = solid.x - 145; cpu.y = solid.y + 82; cpu.grounded = false; cpu.platformId = null;
+      cpu.vx = -120; cpu.vy = 145; cpu.jumps = 1; cpu.recoveryAvailable = true; cpu.invincible = 0; cpu.lastInput = frame(0);
+
+      stepWorld(world, { 0: frame(1) });
+      assert.ok(cpu.lastInput.buttons & BUTTONS.UP, `${stage.id}/${fighter.id} should air jump first`);
+      assert.equal(cpu.lastInput.buttons & BUTTONS.SPECIAL, 0, `${stage.id}/${fighter.id} should preserve Up-X initially`);
+
+      let recovered = cpu.grounded || !!cpu.ledge;
+      for (let seq = 2; seq <= 360 && !recovered; seq++) {
+        stepWorld(world, { 0: frame(seq) });
+        recovered = cpu.grounded || !!cpu.ledge;
+      }
+      assert.equal(recovered, true, `${stage.id}/${fighter.id} should recover to solid terrain or a ledge`);
+      assert.equal(cpu.stocks, 3, `${stage.id}/${fighter.id} should not self-destruct during recovery`);
+    }
+  }
+});
+
+test('hard CPU does not run a side special off the ledge after an offstage target', () => {
+  const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'neon-deck' }, seed: 4, cpu: 'hard', roster: [
+    { slot: 0, clientId: 'human', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:edge', characterId: 'blaze' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const target = world.players[0], cpu = world.players[1], platform = world.platforms[0];
+  cpu.x = platform.x + 65; cpu.y = platform.y - cpu.height / 2; cpu.grounded = true; cpu.platformId = platform.id;
+  target.x = platform.x - 55; target.y = platform.y + 35; target.grounded = false; target.platformId = null;
+
+  for (let seq = 1; seq <= 18; seq++) stepWorld(world, { 0: frame(seq) });
+
+  assert.notEqual(cpu.action?.name, 'specialSide');
+  assert.ok(cpu.x >= platform.x - 5, 'CPU should hold the ledge instead of carrying itself offstage');
+});
+
+test('BOLT CPU sandwiches a target with its returning boomerang', () => {
+  const world = createWorld({ rules: { mode: 'training', stocks: 3, stageId: 'neon-deck' }, seed: 77, cpu: 'hard', roster: [
+    { slot: 0, clientId: 'human', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:bolt', characterId: 'bolt' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const target = world.players[0], cpu = world.players[1], platform = world.platforms[0];
+  target.x = 600; target.y = platform.y - target.height / 2; target.grounded = true; target.platformId = platform.id;
+  cpu.x = 400; cpu.y = platform.y - cpu.height / 2; cpu.grounded = true; cpu.platformId = platform.id;
+  world.entities.push({
+    id: 999, type: 'projectile', owner: cpu.i, kind: 'boomerang',
+    x: 800, y: target.y, vx: -500, vy: 0, damage: 6, kx: 120, ky: 80,
+    life: 40, radius: 32, returning: true, returnDamageScale: .62, color: '#fff', hitPlayers: []
+  });
+
+  stepWorld(world, { 0: frame(1) });
+
+  assert.equal(cpu.lastInput.horizontal, 1);
+  assert.equal(cpu.lastInput.buttons & BUTTONS.SPECIAL, 0);
+});
+
+test('CPU uses neutral jabs up close and holds a punish long enough to create a smash', () => {
+  const jabWorld = createWorld({ rules: { mode: 'training', stocks: 3 }, seed: 18, cpu: 'normal', roster: [
+    { slot: 0, clientId: 'human', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:jab', characterId: 'blaze' }
+  ] });
+  jabWorld.phase = 'active'; jabWorld.countdown = 0;
+  const jabTarget = jabWorld.players[0], jabCpu = jabWorld.players[1], platform = jabWorld.platforms[0];
+  jabCpu.x = 620; jabTarget.x = 655;
+  for (const player of [jabCpu, jabTarget]) {
+    player.y = platform.y - player.height / 2; player.grounded = true; player.platformId = platform.id;
+  }
+  stepWorld(jabWorld, { 0: frame(1) });
+  stepWorld(jabWorld, { 0: frame(2) });
+  assert.equal(jabCpu.lastInput.horizontal, 0);
+  assert.equal(jabCpu.action?.name, 'groundNeutral');
+
+  const smashWorld = createWorld({ rules: { mode: 'training', stocks: 3 }, seed: 29, cpu: 'hard', roster: [
+    { slot: 0, clientId: 'human', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:smash', characterId: 'bolt' }
+  ] });
+  smashWorld.phase = 'active'; smashWorld.countdown = 0;
+  const smashTarget = smashWorld.players[0], smashCpu = smashWorld.players[1], smashPlatform = smashWorld.platforms[0];
+  smashCpu.x = 560; smashTarget.x = 640; smashTarget.damage = 120; smashTarget.stun = 30;
+  for (const player of [smashCpu, smashTarget]) {
+    player.y = smashPlatform.y - player.height / 2; player.grounded = true; player.platformId = smashPlatform.id;
+  }
+  for (let seq = 1; seq <= 18; seq++) stepWorld(smashWorld, { 0: frame(seq) });
+  assert.equal(smashCpu.action?.name, 'groundSide');
+  assert.equal(smashCpu.action?.variant, 'smash');
+  assert.ok(smashCpu.action?.charging || smashCpu.action?.chargeScale > 1);
+});
+
 test('hard CPU recognizes a shielding opponent and chooses a grab punish', () => {
   const world = createWorld({ rules: { mode: 'training', stocks: 3 }, seed: 42, cpu: 'hard', roster: [
     { slot: 0, clientId: 'human', characterId: 'volt' },
@@ -2921,4 +3060,112 @@ test('team CPU ignores a nearby ally and navigates toward an enemy', () => {
   stepWorld(world, { 0: frame(1), 2: frame(1) });
 
   assert.ok(cpu.lastInput.horizontal >= 0, 'CPU must not chase or attack its closer teammate');
+});
+
+test('free-for-all CPUs spread short target locks instead of dogpiling one fighter', () => {
+  const world = createWorld({ rules: { mode: 'stock', stocks: 3 }, seed: 81, cpu: 'normal', roster: [
+    { slot: 0, clientId: 'cpu:volt', characterId: 'volt' },
+    { slot: 1, clientId: 'cpu:blaze', characterId: 'blaze' },
+    { slot: 2, clientId: 'cpu:bolt', characterId: 'bolt' },
+    { slot: 3, clientId: 'cpu:nova', characterId: 'nova' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const platform = world.platforms[0];
+  world.players.forEach((player, index) => {
+    player.x = 520 + index * 70;
+    player.y = platform.y - player.height / 2;
+    player.grounded = true;
+    player.platformId = platform.id;
+    player.invincible = 0;
+  });
+
+  stepWorld(world, {});
+
+  const targetCounts = new Map();
+  for (const brain of world.cpuBrains.values()) {
+    targetCounts.set(brain.targetId, (targetCounts.get(brain.targetId) || 0) + 1);
+    assert.ok(brain.targetLockUntil > world.tick);
+  }
+  assert.ok(targetCounts.size >= 2);
+  assert.ok(Math.max(...targetCounts.values()) <= 2);
+});
+
+test('NOVA distance charge moves the real fighter as a vulnerable star and releases at that position', () => {
+  const world = createWorld({ rules: { mode: 'training', stageId: 'neon-deck' }, roster: [
+    { slot: 0, clientId: 'nova-player', characterId: 'nova' },
+    { slot: 1, clientId: 'cpu:dummy', characterId: 'volt' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const nova = world.players[0], dummy = world.players[1], platform = world.platforms[0];
+  nova.x = 520; nova.y = platform.y - nova.height / 2; nova.grounded = true; nova.invincible = 0;
+  dummy.x = 1000; dummy.y = platform.y - dummy.height / 2; dummy.grounded = true; dummy.invincible = 0;
+  const origin = nova.x;
+
+  for (let seq = 1; seq <= 20; seq++) {
+    stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.SPECIAL, 1), 1: frame(seq) });
+  }
+  assert.equal(nova.action?.name, 'specialSide');
+  assert.equal(nova.action?.charging, true);
+  assert.ok(nova.x > origin + 25, 'the authoritative fighter position should advance while the star charges');
+  const chargedX = nova.x;
+  const snapshot = publicSnapshot(world).players[0];
+  assert.equal(snapshot.actionPhase, 'charge');
+  assert.equal(snapshot.x, nova.x);
+  assert.ok(snapshot.phaseProgress > 0 && snapshot.phaseProgress < 1);
+
+  world.entities.push({
+    id: world.nextEntityId++, type: 'projectile', owner: dummy.i, kind: 'pulse',
+    x: nova.x, y: nova.y, vx: 0, vy: 0, damage: 4, kx: 80, ky: 40,
+    life: 8, radius: 28, hitPlayers: []
+  });
+  stepWorld(world, { 0: frame(21, 0, 0), 1: frame(21) });
+  assert.ok(nova.damage > 0, 'star form must remain hittable');
+  assert.equal(nova.invincible, 0, 'star form must not grant invincibility');
+  assert.ok(Math.abs(nova.x - chargedX) < 35, 'release must not apply the teleport distance a second time');
+});
+
+test('NOVA charged star cannot cross solid stage bodies', () => {
+  const world = createWorld({ rules: { mode: 'training', stageId: 'neon-deck' }, roster: [
+    { slot: 0, clientId: 'nova-player', characterId: 'nova' },
+    { slot: 1, clientId: 'cpu:dummy', characterId: 'volt' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const nova = world.players[0], dummy = world.players[1];
+  const ground = world.platforms.find(platform => platform.ground);
+  const wallLimit = ground.x - nova.width / 2;
+  nova.x = wallLimit - 90; nova.y = ground.y + 145;
+  nova.grounded = false; nova.platformId = null; nova.coyoteFrames = 0; nova.invincible = 0;
+  dummy.x = 1100; dummy.y = 250; dummy.grounded = false; dummy.invincible = 0;
+
+  for (let seq = 1; seq <= 26; seq++) {
+    stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.SPECIAL, 1), 1: frame(seq) });
+  }
+  assert.ok(nova.x <= wallLimit + 0.01, 'solid wall must stop the charging star at its outer face');
+
+  for (let seq = 27; seq <= 33; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.ok(nova.x <= wallLimit + 0.01, 'release and active frames must not warp through the wall');
+});
+
+test('NOVA charged star passes through player pushboxes without becoming invincible', () => {
+  const world = createWorld({ rules: { mode: 'training', stageId: 'neon-deck' }, roster: [
+    { slot: 0, clientId: 'nova-player', characterId: 'nova' },
+    { slot: 1, clientId: 'cpu:dummy', characterId: 'blaze' }
+  ] });
+  world.phase = 'active'; world.countdown = 0;
+  const nova = world.players[0], dummy = world.players[1], ground = world.platforms.find(platform => platform.ground);
+  nova.x = 500; dummy.x = 625;
+  for (const player of world.players) {
+    player.y = ground.y - player.height / 2;
+    player.grounded = true;
+    player.invincible = 0;
+  }
+
+  for (let seq = 1; seq <= 26; seq++) {
+    stepWorld(world, { 0: frame(seq, BUTTONS.RIGHT | BUTTONS.SPECIAL, 1), 1: frame(seq) });
+  }
+
+  assert.equal(nova.action?.charging, true);
+  assert.ok(nova.x > dummy.x + dummy.width / 2, 'charging star should pass completely through another fighter');
+  assert.equal(dummy.damage, 0, 'passing through during charge is movement, not a hidden attack');
+  assert.equal(nova.invincible, 0, 'player pushbox phasing must not grant invincibility');
 });

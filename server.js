@@ -79,7 +79,9 @@ function defaultSelection(index) { return FIGHTERS[index % FIGHTERS.length].id; 
 function createRoom(owner, options = {}) {
   const code = makeCode();
   const room = {
-    code, ownerClientId: owner.clientId, quick: !!options.quick,
+    code, ownerClientId: owner.clientId, quick: !!options.quick, botMatch: !!options.botMatch, demo: !!options.demo,
+    botDifficulty: ['easy', 'normal', 'hard'].includes(options.botDifficulty) ? options.botDifficulty : 'normal',
+    botCharacter: FIGHTERS.some(item => item.id === options.botCharacter) ? options.botCharacter : null,
     rules: normalizeRules({ ...(options.rules || DEFAULT_RULES), items: false }), slots: [],
     inputs: {}, world: null, warmupWorld: null, playing: false, recorded: false, createdAt: Date.now()
   };
@@ -105,13 +107,14 @@ function addSlot(room, socket, selection = {}) {
 function publicRoom(room) {
   return {
     code: room.code, ownerClientId: room.ownerClientId, playing: room.playing, quick: room.quick,
+    botMatch: room.botMatch, demo: room.demo, botDifficulty: room.botDifficulty,
     rules: room.rules,
     players: room.slots.map(slot => ({ index: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId, palette: slot.palette, team: slot.team, ready: slot.ready, connected: !!slot.socketId })),
   };
 }
 function publicRoomDirectory() {
   return [...rooms.values()]
-    .filter(room => !room.quick && !room.playing && room.rules.mode !== 'training' && room.slots.some(slot => slot.socketId))
+    .filter(room => !room.quick && !room.botMatch && !room.demo && !room.playing && room.rules.mode !== 'training' && room.slots.some(slot => slot.socketId))
     .sort((first, second) => second.createdAt - first.createdAt)
     .map(room => {
       const connected = room.slots.filter(slot => slot.socketId);
@@ -133,7 +136,7 @@ function emitRoom(room) {
 }
 
 function refreshWarmup(room) {
-  if (!room || room.playing || room.quick || room.rules.mode === 'training') return;
+  if (!room || room.playing || room.quick || room.botMatch || room.demo || room.rules.mode === 'training') return;
   const roster = room.slots.map(slot => ({
     slot: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId,
     palette: slot.palette, team: slot.team
@@ -238,10 +241,27 @@ function syncWarmupRoster(room) {
 }
 
 function startRoom(room) {
-  if (room.playing || room.slots.length < (room.rules.mode === 'training' ? 1 : 2)) return false;
-  const roster = room.slots.map(slot => ({ slot: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId, palette: slot.palette, team: slot.team }));
+  if (room.playing || room.slots.length < (room.rules.mode === 'training' || room.botMatch || room.demo ? 1 : 2)) return false;
+  let roster = room.slots.map(slot => ({ slot: slot.index, clientId: slot.clientId, nickname: slot.nickname, characterId: slot.characterId, palette: slot.palette, team: slot.team }));
+  if (room.demo) {
+    const firstIndex = Math.floor(Math.random() * FIGHTERS.length);
+    const secondOffset = 1 + Math.floor(Math.random() * Math.max(1, FIGHTERS.length - 1));
+    const secondIndex = (firstIndex + secondOffset) % FIGHTERS.length;
+    roster = [
+      { slot: 0, clientId: 'cpu:demo-a', nickname: 'BOT A', characterId: FIGHTERS[firstIndex].id, palette: 0, team: 0 },
+      { slot: 1, clientId: 'cpu:demo-b', nickname: 'BOT B', characterId: FIGHTERS[secondIndex].id, palette: 1, team: 1 }
+    ];
+  }
   if (room.rules.mode === 'training' && roster.length === 1) roster.push({ slot: 1, clientId: 'cpu:training', nickname: 'BOT', characterId: 'blaze', palette: 0, team: 1 });
-  room.world = createWorld({ rules: room.rules, roster, seed: Date.now(), cpu: 'dummy' });
+  if (room.botMatch && roster.length === 1) {
+    const humanIndex = FIGHTERS.findIndex(fighter => fighter.id === roster[0].characterId);
+    roster.push({
+      slot: 1, clientId: 'cpu:battle', nickname: 'BOT',
+      characterId: room.botCharacter || FIGHTERS[(humanIndex + 1 + FIGHTERS.length) % FIGHTERS.length].id,
+      palette: 1, team: 1
+    });
+  }
+  room.world = createWorld({ rules: room.rules, roster, seed: Date.now(), cpu: room.demo ? 'hard' : room.botMatch ? room.botDifficulty : 'dummy' });
   room.warmupWorld = null;
   room.world.phase = room.rules.mode === 'training' ? 'active' : 'countdown';
   room.world.countdown = room.rules.mode === 'training' ? 0 : countdownTicks;
@@ -255,7 +275,9 @@ function finishRoom(room) {
   room.playing = false;
   if (!room.recorded) {
     room.recorded = true;
-    try { store.recordMatch(room.code, room.world, room.slots); } catch (error) { console.error('stats record failed', error); }
+    if (!room.demo) {
+      try { store.recordMatch(room.code, room.world, room.slots); } catch (error) { console.error('stats record failed', error); }
+    }
   }
   for (const slot of room.slots) slot.ready = false;
   refreshWarmup(room);
@@ -298,7 +320,7 @@ setInterval(() => {
   const begin = performance.now();
   for (const room of rooms.values()) {
     if (room.playing && room.world) {
-      stepWorld(room.world, room.inputs);
+      stepWorld(room.world, room.demo ? {} : room.inputs);
       const snapshot = publicSnapshot(room.world);
       for (const slot of room.slots) if (slot.socketId) io.to(slot.socketId).volatile.emit('state:snapshot', snapshot);
       for (const input of Object.values(room.inputs)) input.pressedButtons = 0;
@@ -324,7 +346,7 @@ setInterval(() => {
     let warmupChanged = false;
     for (const slot of [...room.slots]) {
       if (!slot.disconnectedAt || now - slot.disconnectedAt < reconnectGraceMs) continue;
-      if (room.playing && room.world) {
+      if (room.playing && room.world && !room.demo) {
         forfeitPlayer(room.world, slot.index);
         if (!room.slots.some(other => other.socketId)) { room.world.phase = 'ended'; room.world.winner = null; }
       }
@@ -351,8 +373,14 @@ io.on('connection', socket => {
 
   socket.on('room:create', (payload, reply) => {
     if (!identityRequired(socket, reply)) return;
-    const room = createRoom(socket.data.identity, { rules: payload?.rules });
-    const slot = addSlot(room, socket, payload || {}); slot.ready = room.rules.mode === 'training';
+    const room = createRoom(socket.data.identity, {
+      rules: payload?.rules,
+      botMatch: payload?.botMatch === true,
+      demo: payload?.demo === true,
+      botDifficulty: payload?.botDifficulty,
+      botCharacter: payload?.botCharacter
+    });
+    const slot = addSlot(room, socket, payload || {}); slot.ready = room.rules.mode === 'training' || room.botMatch || room.demo;
     syncWarmupRoster(room);
     reply?.({ ok: true, code: room.code, index: slot.index, resumeToken: slotToken(room, slot), room: publicRoom(room), snapshot: room.warmupWorld ? publicSnapshot(room.warmupWorld) : null }); emitRoom(room);
   });
@@ -410,7 +438,7 @@ io.on('connection', socket => {
 
   socket.on('room:start', reply => {
     const room = rooms.get(socket.data.roomCode);
-    if (!room || room.ownerClientId !== socket.data.identity?.clientId || room.slots.length < (room?.rules.mode === 'training' ? 1 : 2)) return reply?.({ ok: false, error: '시작할 수 없습니다.' });
+    if (!room || room.ownerClientId !== socket.data.identity?.clientId || room.slots.length < (room?.rules.mode === 'training' || room?.botMatch || room?.demo ? 1 : 2)) return reply?.({ ok: false, error: '시작할 수 없습니다.' });
     if (!room.slots.every(slot => slot.ready)) return reply?.({ ok: false, error: '모든 플레이어가 준비해야 합니다.' });
     reply?.({ ok: startRoom(room) });
   });
@@ -433,7 +461,7 @@ io.on('connection', socket => {
     }
     const slot = room.slots.find(item => item.socketId === socket.id || item.clientId === socket.data.identity?.clientId);
     if (slot) {
-      if (room.playing && room.world) forfeitPlayer(room.world, slot.index);
+      if (room.playing && room.world && !room.demo) forfeitPlayer(room.world, slot.index);
       delete room.inputs[slot.index];
       room.slots.splice(room.slots.indexOf(slot), 1);
     }
@@ -450,7 +478,7 @@ io.on('connection', socket => {
 
   socket.on('input:frame', payload => {
     const room = rooms.get(socket.data.roomCode); const slot = room?.slots.find(item => item.socketId === socket.id);
-    if (!room || (!room.playing && !room.warmupWorld) || !slot) return;
+    if (!room || room.demo || (!room.playing && !room.warmupWorld) || !slot) return;
     const now = Date.now(); if (now - slot.inputWindow >= 1000) { slot.inputWindow = now; slot.inputCount = 0; }
     slot.inputCount += 1; if (slot.inputCount > 60) return;
     const seq = Number(payload?.seq);

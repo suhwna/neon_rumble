@@ -506,7 +506,7 @@ socket.on('room:state', next => {
 socket.on('rooms:changed', () => { if (!room && state === 'menu') refreshRoomDirectory(); });
 socket.on('queue:state', data => { queueBar.classList.remove('hidden'); document.querySelector('#queue-status').textContent = `${data.position}번째 · ${Math.floor(data.elapsedMs / 1000)}초`; });
 socket.on('match:found', data => { myIndex = data.index; saveSession({ code: data.code, resumeToken: data.resumeToken }); queueBar.classList.add('hidden'); });
-socket.on('match:start', payload => { room = payload.room; rules = room.rules; waitingRoom.classList.add('hidden'); beginMatch(payload.snapshot); });
+socket.on('match:start', payload => { room = payload.room; rules = room.rules; if (room.demo) myIndex = -1; waitingRoom.classList.add('hidden'); beginMatch(payload.snapshot); });
 socket.on('state:snapshot', receiveSnapshot);
 socket.on('match:end', payload => { receiveSnapshot(payload.snapshot); showResult(payload.winner); });
 
@@ -515,7 +515,7 @@ function enterRoom(nextRoom, warmupSnapshot = null) {
   mountWaitingUi();
   menu.classList.add('hidden'); waitingRoom.classList.toggle('hidden', room.playing); result.classList.add('hidden'); trainingPanel.classList.add('hidden'); countdown.classList.add('hidden');
   lobbyActions.classList.add('hidden'); roomBrowser.classList.add('hidden'); queueBar.classList.add('hidden'); roomBar.classList.remove('hidden'); playerList.classList.remove('hidden');
-  roomSettings.classList.toggle('hidden', room.quick);
+  roomSettings.classList.toggle('hidden', room.quick || room.botMatch || room.demo);
   document.querySelector('#room-code').textContent = room.code;
   document.querySelector('#waiting-room-code').textContent = room.code;
   renderLobby(); setError('');
@@ -629,6 +629,35 @@ document.querySelector('#create-button').addEventListener('click', async () => {
 document.querySelector('#quick-button').addEventListener('click', async () => {
   const response = await emitAck('queue:join', { characterId: selectedCharacter, palette: selectedPalette });
   if (response?.ok) { lobbyActions.classList.add('hidden'); roomBrowser.classList.add('hidden'); queueBar.classList.remove('hidden'); setError(''); }
+});
+document.querySelector('#bot-match-button').addEventListener('click', async () => {
+  setError('');
+  const response = await emitAck('room:create', {
+    characterId: selectedCharacter,
+    palette: selectedPalette,
+    botMatch: true,
+    botDifficulty: 'normal',
+    rules: { ...currentSettings(), mode: 'stock', stocks: 3, timeSeconds: 420, items: false, hazards: false }
+  });
+  if (!response?.ok) return setError(response?.error || 'BOT 대전을 시작할 수 없습니다.');
+  myIndex = response.index;
+  saveSession({ code: response.code, resumeToken: response.resumeToken });
+  enterRoom(response.room, response.snapshot);
+  const started = await emitAck('room:start');
+  if (!started?.ok) setError(started?.error || 'BOT 대전을 시작할 수 없습니다.');
+});
+document.querySelector('#demo-button').addEventListener('click', async () => {
+  setError('');
+  const response = await emitAck('room:create', {
+    demo: true,
+    rules: { ...currentSettings(), mode: 'stock', stocks: 3, timeSeconds: 420, items: false, hazards: false }
+  });
+  if (!response?.ok) return setError(response?.error || 'BOT 데모를 시작할 수 없습니다.');
+  saveSession({ code: response.code, resumeToken: response.resumeToken });
+  enterRoom(response.room, response.snapshot);
+  myIndex = -1;
+  const started = await emitAck('room:start');
+  if (!started?.ok) setError(started?.error || 'BOT 데모를 시작할 수 없습니다.');
 });
 document.querySelector('#practice-button').addEventListener('click', async () => {
   setError('');
@@ -2095,59 +2124,34 @@ function drawUltimateFighterEffect(player, fighter, color, phase, progress) {
   ctx.restore();
 }
 
-function drawNovaWarpEffect(player, action, phase, progress, color) {
-  if (!phase) return;
-  if (player.visualWarpAction !== action || !player.visualWarpOrigin) {
-    player.visualWarpAction = action;
-    player.visualWarpOrigin = {
-      x: Number.isFinite(player.visualLastX) ? player.visualLastX : player.x,
-      y: Number.isFinite(player.visualLastY) ? player.visualLastY : player.y
-    };
+function drawNovaChargeStar(player, color, progress) {
+  const size = 18 + clamp(progress, 0, 1) * 5;
+  ctx.save();
+  ctx.translate(player.x, player.y);
+  ctx.rotate(-Math.PI / 2 + progress * .28);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.4;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 7;
+  ctx.beginPath();
+  for (let point = 0; point < 10; point++) {
+    const angle = point * Math.PI / 5;
+    const radius = point % 2 === 0 ? size : size * .43;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+    if (point === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   }
-
-  const active = phase === 'active';
-  const recovery = phase === 'recovery';
-  const originX = player.visualWarpOrigin.x - player.x;
-  const originY = player.visualWarpOrigin.y - player.y;
-  if (!active && !recovery) return;
-
-  // A warp should read as two discrete events: a small "pop" where NOVA
-  // disappears and another where NOVA arrives. Avoid trails and seams that can
-  // be mistaken for an attack hitbox or make the teleport feel sluggish.
-  const drawStarPop = (x, y, amount, alpha, size = 1) => {
-    const t = clamp(amount, 0, 1);
-    const expand = 1 - Math.pow(1 - t, 3);
-    const radius = (7 + expand * 17) * size;
-    const innerRadius = radius * .43;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(-Math.PI / 2 + t * .32);
-    ctx.globalAlpha = alpha * (1 - t * .86);
-    ctx.fillStyle = color;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(1.2, (2.3 - t * .7) * size);
-    ctx.beginPath();
-    for (let point = 0; point < 10; point++) {
-      const angle = point * Math.PI / 5;
-      const pointRadius = point % 2 === 0 ? radius : innerRadius;
-      const pointX = Math.cos(angle) * pointRadius;
-      const pointY = Math.sin(angle) * pointRadius;
-      if (point === 0) ctx.moveTo(pointX, pointY);
-      else ctx.lineTo(pointX, pointY);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  if (active) {
-    drawStarPop(originX, originY, progress, .92, .92);
-    drawStarPop(0, 0, clamp((progress - .16) / 1.5, 0, .56), .98, 1.08);
-  } else {
-    const finish = clamp(progress * 2.2, 0, 1);
-    drawStarPop(0, 0, .56 + finish * .44, 1 - finish, 1.08);
-  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawAttackEffect(player, action, color, age, phase, progress, fighter) {
@@ -2582,11 +2586,7 @@ function drawPlayer(p, dt) {
   ctx.save(); ctx.translate(p.x, p.y);
   const novaWarpMove = fighter.id === 'nova'
     && (action === 'specialSide' && moveMotion === 'blink' || action === 'specialUp' && moveMotion === 'warp');
-  if (novaWarpMove) drawNovaWarpEffect(p, action, phase, progress, color);
-  else {
-    p.visualWarpAction = null;
-    p.visualWarpOrigin = null;
-  }
+  const novaWarpCharging = novaWarpMove && phase === 'charge' && p.chargeFrames > 0;
   // Freefall is already readable from its dedicated pose. A canvas filter here
   // forces every limb, shadow, and effect through an offscreen filter pass and
   // caused NOVA's post-warp frames to hitch on some browsers.
@@ -2669,7 +2669,9 @@ function drawPlayer(p, dt) {
     ctx.strokeStyle = '#fff36b'; ctx.lineWidth = 5; ctx.globalAlpha *= .45 + p.parryFrames * .12;
     ctx.beginPath(); ctx.arc(0, 0, p.width + (5 - p.parryFrames) * 8, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
   }
-  ctx.translate(bodyX, bodyY); ctx.rotate(rotation); ctx.scale(scaleX, scaleY);
+  ctx.translate(bodyX, bodyY);
+  if (novaWarpCharging) ctx.scale(0, 0);
+  ctx.rotate(rotation); ctx.scale(scaleX, scaleY);
   const legLength = 18, bodyHeight = p.height - legLength, bodyCenterY = -legLength / 2;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const targetLegSwing = action === 'dash' ? run * 13 : action === 'run' ? run * 9 : action === 'walk' ? run * 5 : 0;
@@ -2923,6 +2925,7 @@ function drawPlayer(p, dt) {
   }
   if (action.startsWith('special')) drawReadableSpecialEffect(p, fighter, action, moveMotion, phase, progress, color);
   ctx.restore();
+  if (novaWarpCharging) drawNovaChargeStar(p, color, progress);
   p.visualLastX = p.x;
   p.visualLastY = p.y;
 
@@ -3191,8 +3194,20 @@ requestAnimationFrame(loop);
 
 function showResult(index){state='result';winnerIndex=index;const winner=players.find(player=>player.i===index),fighter=winner?(FIGHTERS.find(item=>item.id===winner.characterId)||FIGHTERS[0]):null,color=fighter?.palettes?.[winner.palette%fighter.palettes.length]||fighter?.color||'#ffffff';document.querySelector('#winner-name').textContent=fighter?.name||'DRAW';document.querySelector('#winner-name').style.color=color;document.querySelector('#winner-avatar').textContent=fighter?.icon||'×';document.querySelector('#winner-avatar').style.color=color;result.classList.remove('hidden');trainingPanel.classList.add('hidden');socket.emit('stats:get',updateStats);}
 function returnToWaitingRoom(){result.classList.add('hidden');menu.classList.add('hidden');waitingRoom.classList.remove('hidden');state='waiting';renderLobby();}
-document.querySelector('#rematch-button').addEventListener('click',returnToWaitingRoom);
-document.querySelector('#menu-button').addEventListener('click',returnToWaitingRoom);
+document.querySelector('#rematch-button').addEventListener('click', async () => {
+  if (!room?.botMatch && !room?.demo) return returnToWaitingRoom();
+  const mine = room.players.find(player => player.clientId === identity?.clientId);
+  const ready = await emitAck('player:select', {
+    characterId: selectedCharacter, palette: selectedPalette, team: mine?.team || 0, ready: true
+  });
+  if (!ready?.ok) return setError('재대전을 준비할 수 없습니다.');
+  const started = await emitAck('room:start');
+  if (!started?.ok) setError(started?.error || '재대전을 시작할 수 없습니다.');
+});
+document.querySelector('#menu-button').addEventListener('click', () => {
+  if (room?.botMatch || room?.demo) leaveRoomToMenu();
+  else returnToWaitingRoom();
+});
 
 trainingPanel.querySelector('[data-training="reset"]').addEventListener('click',()=>{resetTrainingInputHistory();socket.emit('training:command',{type:'reset'});});
 trainingPanel.querySelector('[data-training="pause"]').addEventListener('click',event=>{paused=!paused;event.currentTarget.classList.toggle('active',paused);event.currentTarget.setAttribute('aria-pressed',String(paused));socket.emit('training:command',{type:'pause',value:paused});});
@@ -3282,7 +3297,7 @@ function ensureAudio(){audio||=new(window.AudioContext||window.webkitAudioContex
 function beep(freq,duration,type){if(muted)return;ensureAudio();const oscillator=audio.createOscillator(),gain=audio.createGain();oscillator.type=type;oscillator.frequency.value=freq;gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);oscillator.connect(gain).connect(audio.destination);oscillator.start();oscillator.stop(audio.currentTime+duration);}
 function clamp(value,min,max){return Math.max(min,Math.min(max,value));}
 function playerTag(player){
-  if(player?.clientId?.startsWith('cpu:'))return 'BOT';
+  if(player?.clientId?.startsWith('cpu:'))return player.nickname||'BOT';
   return player?.nickname||room?.players?.find(slot=>slot.clientId===player?.clientId)?.nickname||`P${player.i+1}`;
 }
 function formatTime(ticks){if(rules.mode==='training')return '∞';const seconds=Math.max(0,Math.ceil(ticks/60));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;}

@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { io } = require('socket.io-client');
+const { FIGHTERS } = require('../content');
 
 const root = path.join(__dirname, '..');
 const port = 43000 + Math.floor(Math.random() * 1000);
@@ -225,6 +226,67 @@ test('public queue starts a server-owned match with two players after the wait w
   const health = await fetch(`http://127.0.0.1:${port}/healthz`).then(response => response.json());
   assert.equal(health.ok, true);
   assert.equal(typeof health.tickP95Ms, 'number');
+});
+
+test('solo bot match starts a normal stock battle and stays out of the public room directory', async () => {
+  const fighter = await connect('BotFighter');
+  const created = await ack(fighter.socket, 'room:create', {
+    characterId: 'bolt',
+    botMatch: true,
+    botDifficulty: 'hard',
+    botCharacter: 'nova',
+    rules: { mode: 'stock', stocks: 3, timeSeconds: 420, stageId: 'neon-deck', items: false, hazards: false }
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.botMatch, true);
+  assert.equal(created.room.botDifficulty, 'hard');
+  assert.equal(created.room.players.length, 1);
+  assert.equal(created.room.players[0].ready, true);
+
+  const observer = await connect('BotRoomObserver');
+  const directory = await ack(observer.socket, 'rooms:list');
+  assert.equal(directory.rooms.some(room => room.code === created.code), false);
+
+  const startedEvent = once(fighter.socket, 'match:start');
+  assert.equal((await ack(fighter.socket, 'room:start')).ok, true);
+  const started = await startedEvent;
+  assert.equal(started.snapshot.rules.mode, 'stock');
+  assert.equal(started.snapshot.rules.stocks, 3);
+  assert.equal(started.snapshot.phase, 'countdown');
+  assert.equal(started.snapshot.players.length, 2);
+  const bot = started.snapshot.players.find(player => player.clientId === 'cpu:battle');
+  assert.equal(bot.nickname, 'BOT');
+  assert.equal(bot.characterId, 'nova');
+
+  assert.equal((await ack(fighter.socket, 'room:leave')).ok, true);
+});
+
+test('bot versus bot demo uses two random CPU fighters without recording the viewer as a fighter', async () => {
+  const viewer = await connect('DemoViewer');
+  const created = await ack(viewer.socket, 'room:create', {
+    demo: true,
+    rules: { mode: 'stock', stocks: 3, timeSeconds: 420, stageId: 'neon-deck', items: false, hazards: false }
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.room.demo, true);
+  assert.equal(created.room.players.length, 1);
+  assert.equal(created.room.players[0].ready, true);
+
+  const observer = await connect('DemoRoomObserver');
+  const directory = await ack(observer.socket, 'rooms:list');
+  assert.equal(directory.rooms.some(room => room.code === created.code), false);
+
+  const startedEvent = once(viewer.socket, 'match:start');
+  assert.equal((await ack(viewer.socket, 'room:start')).ok, true);
+  const started = await startedEvent;
+  assert.equal(started.snapshot.phase, 'countdown');
+  assert.equal(started.snapshot.players.length, 2);
+  assert.deepEqual(started.snapshot.players.map(player => player.nickname), ['BOT A', 'BOT B']);
+  assert.ok(started.snapshot.players.every(player => player.clientId.startsWith('cpu:demo-')));
+  assert.equal(new Set(started.snapshot.players.map(player => player.characterId)).size, 2);
+  assert.ok(started.snapshot.players.every(player => FIGHTERS.some(fighter => fighter.id === player.characterId)));
+
+  assert.equal((await ack(viewer.socket, 'room:leave')).ok, true);
 });
 
 test('leaving training removes the room slot and prevents automatic resume', async () => {

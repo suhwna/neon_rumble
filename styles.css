@@ -147,6 +147,8 @@ h1 em { color: #ff335f; font-style: normal; margin-left: .08em; }
 }
 .lobby-button.secondary { background: #2a2e42; color: #fff; }
 .lobby-button.hot { background: #ff335f; color: #fff; }
+.lobby-button.bot { background: #18b986; color: #fff; }
+.lobby-button.demo { background: #1676d2; color: #fff; }
 .lobby-button.practice { background: #8b5cff; color: #fff; }
 .lobby-button.ghost { background: transparent; border: 1px solid rgba(255,255,255,.2); color: #aeb4cc; }
 .room-browser {
