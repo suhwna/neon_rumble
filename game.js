@@ -2743,8 +2743,10 @@ function drawPlayer(p, dt) {
   const color = fighter.palettes[p.palette % fighter.palettes.length];
   const hitFlash = p.flashUntil > performance.now();
   const impactCue = p.impactVisualUntil > performance.now();
+  const ledgeInvincible = !!p.ledge && p.invincible > 0;
   const invincibleFlash = p.invincible > 0 && Math.floor(p.invincible / 3) % 2;
-  const fullBodyFlash = invincibleFlash;
+  const ledgeInvincibleOutline = ledgeInvincible && invincibleFlash;
+  const fullBodyFlash = invincibleFlash && !ledgeInvincible;
   const renderColor = fullBodyFlash ? '#ffffff' : color;
   const action = displayedAction(p);
   if (p.keyframeAction !== action) {
@@ -3076,7 +3078,10 @@ function drawPlayer(p, dt) {
     ctx.save();ctx.globalAlpha=(1-recoverAge)*.72;ctx.strokeStyle='#b9fbff';ctx.lineWidth=3;ctx.shadowBlur=12;ctx.shadowColor='#65ecff';
     ctx.beginPath();ctx.arc(0,0,p.width*.55+recoverAge*16,-Math.PI*.85,Math.PI*.7);ctx.stroke();ctx.restore();
   }
-  ctx.globalAlpha = invincibleFlash ? .42 : 1;
+  // Ledge invincibility lasts long enough that the ordinary 42%-alpha blink
+  // made the fighter look absent. Keep the body readable and pulse only its
+  // outline; dodge/respawn invincibility retains the stronger shared flash.
+  ctx.globalAlpha = ledgeInvincible ? .9 : invincibleFlash ? .42 : 1;
   if (p.invincible > 0) {
     ctx.shadowBlur = 13;
     ctx.shadowColor = '#ffffff';
@@ -3217,7 +3222,7 @@ function drawPlayer(p, dt) {
   const crowding = window.NEON_READABILITY?.crowding(p, players) || 0;
   const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding);
   const hitAccent = hitFlash && impactCue && (action === 'hit' || action === 'groundHit' || action === 'grabbedHit');
-  const silhouetteOutline = hitAccent ? '#f7fbff' : '#080d19';
+  const silhouetteOutline = hitAccent || ledgeInvincibleOutline ? '#f7fbff' : '#080d19';
   drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
   drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);
   let frontX = p.face * 23, frontY = 3, backX = -p.face * 18, backY = 7;
