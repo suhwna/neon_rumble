@@ -101,8 +101,14 @@
     if (!images.has(id)) queue(id, definition.background);
     if (!ready(id)) return false;
     const image = images.get(id);
-    const width = Math.max(1, Math.round(bounds.width));
-    const height = Math.max(1, Math.round(bounds.height));
+    const outputWidth = Math.max(1, Math.round(bounds.width));
+    const outputHeight = Math.max(1, Math.round(bounds.height));
+    // A full-resolution static backdrop is expensive when four browser tabs
+    // render simultaneously. Cache it at a bounded resolution and let Canvas
+    // composite the single scaled layer; fighters and terrain stay native-res.
+    const cacheScale = Math.min(1, 960 / outputWidth);
+    const width = Math.max(1, Math.round(outputWidth * cacheScale));
+    const height = Math.max(1, Math.round(outputHeight * cacheScale));
     const cacheKey = `${id}:${width}x${height}`;
     let cached = stageCache.get(cacheKey);
     if (!cached && root.document?.createElement) {

@@ -42,3 +42,16 @@ test('every authored move exposes finite human joint bends', () => {
     }
   }
 });
+
+test('fighters use distinct bounded render transition styles', () => {
+  const signatures = new Set();
+  for (const fighter of ['volt', 'blaze', 'bolt', 'nova']) {
+    const style = MOTION.styleFor(fighter);
+    assert.ok(Object.values(style).every(Number.isFinite), `${fighter} finite style`);
+    assert.ok(style.activeMs >= 12 && style.activeMs <= 24, `${fighter} active pose stays responsive`);
+    assert.ok(style.phaseMs >= style.activeMs && style.phaseMs <= 40, `${fighter} phase blend`);
+    assert.ok(style.entryMs >= style.phaseMs && style.entryMs <= 80, `${fighter} action blend`);
+    signatures.add(JSON.stringify(style));
+  }
+  assert.equal(signatures.size, 4, 'each fighter should carry a distinct motion cadence');
+});

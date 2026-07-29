@@ -143,6 +143,16 @@
     nova: { frontElbowX: 4, frontElbowY: -3, backElbowX: -4, backElbowY: -2 }
   });
 
+  // Rendering-only transition timing. These values do not delay hitboxes or
+  // gameplay frames; they only control how quickly the authored silhouette
+  // settles into a new state.
+  const MOTION_STYLES = Object.freeze({
+    volt: Object.freeze({ entryMs: 42, phaseMs: 24, activeMs: 16 }),
+    blaze: Object.freeze({ entryMs: 76, phaseMs: 34, activeMs: 22 }),
+    bolt: Object.freeze({ entryMs: 56, phaseMs: 27, activeMs: 18 }),
+    nova: Object.freeze({ entryMs: 66, phaseMs: 31, activeMs: 20 })
+  });
+
   function jointProfile(fighterId, action) {
     const actionJoints = ACTION_JOINTS[action];
     if (!actionJoints) return null;
@@ -159,7 +169,10 @@
     profileFor(fighterId, action) {
       return PROFILES[fighterId]?.[action] || null;
     },
-    jointFor: jointProfile
+    jointFor: jointProfile,
+    styleFor(fighterId) {
+      return MOTION_STYLES[fighterId] || MOTION_STYLES.volt;
+    }
   });
 
   root.NEON_MOTION = api;

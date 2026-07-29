@@ -140,6 +140,9 @@ test('four browsers can create, join, ready, play, reconnect, and keep render bu
   await host.page.locator('#waiting-start').click();
   for (const client of clients) await expect(client.page.locator('#waiting-room')).toBeHidden();
 
+  // Chromium intentionally deprioritizes a page after newer contexts open.
+  // Measure the active player's render budget, not a background-tab throttle.
+  await host.page.bringToFront();
   await host.page.waitForTimeout(2600);
   const metrics = await host.page.evaluate(() => window.__NEON_METRICS__);
   expect(metrics.players).toBe(4);

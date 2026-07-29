@@ -40,7 +40,7 @@
       return this.metrics.inputAckMs;
     }
 
-    correction(error, now) {
+    correction(error, now, ackMs = 0) {
       const distance = Math.max(0, Number(error) || 0);
       this.metrics.correctionPx = +(this.metrics.correctionPx * .88 + distance * .12).toFixed(2);
       this.metrics.correctionPeakPx = +Math.max(this.metrics.correctionPeakPx, distance).toFixed(2);
@@ -52,9 +52,15 @@
         this.metrics.emergencyCorrections = (this.metrics.emergencyCorrections || 0) + 1;
         return 1;
       }
-      // Medium errors converge across a few frames instead of visibly
-      // teleporting. Truly unsafe divergence still snaps immediately.
-      return distance > 90 ? 0.45 : null;
+      // Keep sub-pixel server noise inside a dead zone. Larger divergence is
+      // repaid progressively, with a slightly firmer convergence under high
+      // ACK latency so the prediction cannot drift indefinitely.
+      const latency = Math.max(0, Math.min(1, (Number(ackMs) || 0) / 180));
+      if (distance <= 1.5) return 0;
+      if (distance <= 10) return .07 + latency * .02;
+      if (distance <= 36) return .14 + latency * .04;
+      if (distance <= 90) return .24 + latency * .06;
+      return .4 + latency * .08;
     }
   }
 

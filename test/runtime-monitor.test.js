@@ -14,4 +14,12 @@ test('runtime monitor samples frames, snapshots, slow frames, and resets its win
   assert.equal(sample.slowFrames, 1);
   assert.equal(sample.players, 4);
   assert.equal(monitor.frames, 0);
+
+  monitor.frame(1_030, 30);
+  monitor.snapshot();
+  monitor.reset(2_000);
+  assert.equal(monitor.frames, 0);
+  assert.equal(monitor.snapshots, 0);
+  assert.equal(monitor.slowFrames, 0);
+  assert.equal(monitor.frame(2_500, 16), null);
 });

@@ -1891,13 +1891,20 @@ function updatePlayer(world, player, rawInput) {
   if (!locked && player.shieldBuffer > 0 && bit(input.buttons, BUTTONS.SHIELD)) {
     player.shieldBuffer = 0;
     if (!player.grounded && player.airDodgeAvailable) {
+      player.actionBuffer = null;
       performAirDodge(player, input);
     } else if (player.grounded && input.vertical > 0.4) {
+      player.actionBuffer = null;
       performDodge(player, 'spotDodge', 24, 14, 0);
     } else if (player.grounded && Math.abs(input.horizontal) > 0.4) {
+      player.actionBuffer = null;
       performDodge(player, 'roll', 22, 16, input.horizontal * 600 * character.speed);
     } else if (player.grounded && player.shieldLock === 0) {
       player.shielding = true; player.shieldHoldFrames = 1; player.shieldReleaseQueued = false; player.actionName = 'shield';
+      // A fresh shield chord must resolve once. Keep attack/grab and up-special
+      // so their authored shield-cancel branches below can consume them, but
+      // discard a neutral special that would otherwise fire after release.
+      if (player.actionBuffer?.type === 'special' && input.vertical >= -0.45) player.actionBuffer = null;
     }
   }
   if (player.shielding) {
@@ -2422,7 +2429,7 @@ function updateEntities(world) {
           }
           emit(world, 'explosion', { player: target.i, x: entity.x, y: entity.y, radius: entity.splashRadius, color: entity.color });
         }
-        if (entity.kind !== 'boomerang' && !entity.persistent) { entity.life = 0; break; }
+        if (!entity.persistent) { entity.life = 0; break; }
       }
     }
   }

@@ -1,6 +1,10 @@
 (function exposeRuntimeMonitor(root) {
   class RuntimeMonitor {
     constructor(startedAt = performance.now()) {
+      this.reset(startedAt);
+    }
+
+    reset(startedAt = performance.now()) {
       this.startedAt = startedAt;
       this.frames = 0;
       this.frameTime = 0;

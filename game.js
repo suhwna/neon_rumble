@@ -119,7 +119,7 @@ let selectedPalette = Number(localStorage.getItem('neon_palette') || 0);
 let players = [], platforms = [], entities = [], items = [], stage = STAGES[0], rules = { ...DEFAULT_RULES };
 let snapshots = [], latestSnapshot = null, keys = new Set(), particles = [], trails = [], lastEvents = new Set(), trailClock = 0, effectQuality = 1;
 let lastFrame = performance.now(), inputSeq = 0, lastInputSent = 0;
-let pingSamples = [], snapshotIntervals = [], snapshotTickRates = [], lastSnapshotArrival = 0, lastSnapshotTick = null, ping = 0, networkJitter = 0, adaptiveDelay = 90, remainingTicks = 0, winnerIndex = null;
+let pingSamples = [], snapshotIntervals = [], snapshotTickRates = [], lastSnapshotArrival = 0, lastSnapshotTick = null, ping = 0, networkJitter = 0, adaptiveDelay = 90, targetAdaptiveDelay = 90, remainingTicks = 0, winnerIndex = null;
 let paused = false, hitboxes = false, localCue = null, localAttackIntent = null;
 let trainingInputHistory = [], trainingInputSignature = '', trainingInputSequence = 0, trainingInputLastRender = 0;
 let backgroundCache = null, backgroundCacheStage = '';
@@ -727,6 +727,14 @@ roomSettings.querySelectorAll('select,input').forEach(control => control.addEven
 function beginMatch(snapshot) {
   state = 'playing'; menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
   networkQuality.reset();
+  runtimeMonitor.reset(performance.now());
+  runtimeMetrics.fps = 0;
+  runtimeMetrics.frameMs = 0;
+  runtimeMetrics.slowFrames = 0;
+  snapshotIntervals = [];
+  snapshotTickRates = [];
+  lastSnapshotArrival = 0;
+  lastSnapshotTick = null;
   trainingPanel.classList.toggle('hidden', snapshot.rules.mode !== 'training');
   if (snapshot.rules.mode === 'training') {
     const trainingPlayer = snapshot.players.find(player => player.i === myIndex) || snapshot.players[0];
@@ -966,6 +974,7 @@ function extrapolatedPhaseProgress(player, elapsed) {
 }
 function renderNetworkState(dt, now) {
   if (!latestSnapshot) return;
+  adaptiveDelay = lerp(adaptiveDelay, targetAdaptiveDelay, 1 - Math.exp(-Math.max(.001, dt) * 3.4));
   const renderAt = now - adaptiveDelay;
   while (snapshots.length > 2 && snapshots[1].receivedAt <= renderAt) snapshots.shift();
   const older = snapshots[0] || latestSnapshot, newer = snapshots[1] || older;
@@ -989,7 +998,9 @@ function renderNetworkState(dt, now) {
     const from = renderOlderByIndex.get(source.i) || source;
     if (source.i === myIndex) {
       const localSource = renderLatestByIndex.get(source.i) || source;
-      const elapsed = Math.min(.1, Math.max(0, (now - latestSnapshot.receivedAt) / 1000));
+      const snapshotAge = Math.min(.1, Math.max(0, (now - latestSnapshot.receivedAt) / 1000));
+      const inputLead = Math.min(.07, Math.max(0, Number(runtimeMetrics.inputAckMs) || 0) / 2000);
+      const predictionLead = Math.min(.12, snapshotAge + inputLead);
       const local = readInput(); const fighter = FIGHTERS.find(item => item.id === localSource.characterId);
       const actionName = localSource.actionName || '';
       const aerialDrift = /^air(Neutral|Forward|Back|Up|Down)$/.test(actionName);
@@ -999,9 +1010,9 @@ function renderNetworkState(dt, now) {
         ? (localSource.movementState === 'pivot' ? fighter.pivotDashSpeed : fighter.dashSpeed)
         : localSource.movementState === 'run' ? fighter.runSpeed : fighter.walkSpeed;
       const targetVx = locked ? localSource.vx : local.horizontal * (localSource.grounded ? groundPredictionSpeed * fighter.speed : 345 * fighter.air);
-      const predictedVx = lerp(localSource.vx, targetVx, clamp(elapsed * (localSource.grounded ? 25 : 14), 0, 1));
-      const predictedX = localSource.x + (localSource.vx + predictedVx) * .5 * elapsed;
-      const predictedY = localSource.y + (localSource.grounded ? 0 : localSource.vy * elapsed + 720 * elapsed * elapsed);
+      const predictedVx = lerp(localSource.vx, targetVx, clamp(predictionLead * (localSource.grounded ? 25 : 14), 0, 1));
+      const predictedX = localSource.x + (localSource.vx + predictedVx) * .5 * predictionLead;
+      const predictedY = localSource.y + (localSource.grounded ? 0 : localSource.vy * predictionLead + 720 * predictionLead * predictionLead);
       const lifecycleJump = localSource.respawn > 0 || display.respawn > 0
         || !!localSource.eliminated !== !!display.eliminated;
       if (lifecycleJump) {
@@ -1012,21 +1023,28 @@ function renderNetworkState(dt, now) {
         display.y = localSource.y;
       } else {
         const correctionError = Math.hypot(predictedX - display.x, predictedY - display.y);
-        const hardCorrection = networkQuality.correction(correctionError, now);
-        const correction = hardCorrection || Math.min(1, dt * 30);
-        display.x = lerp(display.x, predictedX, correction);
-        display.y = lerp(display.y, predictedY, correction);
+        const correction = networkQuality.correction(correctionError, now, runtimeMetrics.inputAckMs);
+        if (correction > 0) {
+          display.x = lerp(display.x, predictedX, correction);
+          display.y = lerp(display.y, predictedY, correction);
+        }
       }
       copyState(display, localSource);
-      display.actionFrame = (Number(localSource.actionFrame) || 0) + (localSource.hitstop > 0 ? 0 : elapsed * 60);
-      display.phaseProgress = extrapolatedPhaseProgress(localSource, elapsed);
+      display.actionFrame = (Number(localSource.actionFrame) || 0) + (localSource.hitstop > 0 ? 0 : snapshotAge * 60);
+      display.phaseProgress = extrapolatedPhaseProgress(localSource, snapshotAge);
       if (localCue && localSource.ackSeq >= localCue.seq) localCue = null;
     } else {
-      display.x = lerp(from.x, source.x, mix); display.y = lerp(from.y, source.y, mix);
+      const extrapolation = mix >= 1 ? clamp((renderAt - newer.receivedAt) / 1000, 0, .08) : 0;
+      display.x = lerp(from.x, source.x, mix) + (Number(source.vx) || 0) * extrapolation;
+      display.y = lerp(from.y, source.y, mix) + (Number(source.vy) || 0) * extrapolation;
       copyState(display, mix < .5 ? from : source);
       if (from.actionName === source.actionName && from.actionPhase === source.actionPhase) {
         display.actionFrame = lerp(Number(from.actionFrame) || 0, Number(source.actionFrame) || 0, mix);
         display.phaseProgress = lerp(Number(from.phaseProgress) || 0, Number(source.phaseProgress) || 0, mix);
+        if (extrapolation > 0 && source.hitstop <= 0) {
+          display.actionFrame += extrapolation * 60;
+          display.phaseProgress = extrapolatedPhaseProgress(source, extrapolation);
+        }
       }
     }
   }
@@ -1066,7 +1084,7 @@ setInterval(() => {
     if (!response || !Number.isFinite(response.clientTime)) return;
     const sample = performance.now() - response.clientTime; pingSamples.push(sample); if (pingSamples.length > 9) pingSamples.shift();
     ping = [...pingSamples].sort((a,b) => a-b)[Math.floor(pingSamples.length / 2)] || 0;
-    adaptiveDelay = clamp(68 + ping * .35 + networkJitter * 1.65, 70, 150);
+    targetAdaptiveDelay = clamp(62 + ping * .36 + networkJitter * 1.35, 65, 145);
   });
 }, 1500);
 
@@ -1486,6 +1504,19 @@ const BASE_KEY_POSE = Object.freeze({
   frontHandX: 23, frontHandY: -5, backHandX: -18, backHandY: 2,
   frontFootX: 14, frontFootLift: 0, backFootX: -14, backFootLift: 0
 });
+
+function blendKeyPose(from, to, amount) {
+  if (!to) return null;
+  if (!from) return { ...to };
+  const mix = clamp(amount, 0, 1);
+  const pose = {};
+  for (const key of Object.keys(BASE_KEY_POSE)) {
+    const start = Number.isFinite(from[key]) ? from[key] : BASE_KEY_POSE[key];
+    const end = Number.isFinite(to[key]) ? to[key] : BASE_KEY_POSE[key];
+    pose[key] = lerp(start, end, mix);
+  }
+  return pose;
+}
 
 const LOOP_KEYFRAMES = Object.freeze({
   idle: [
@@ -2182,13 +2213,13 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
   return null;
 }
 
-function drawOutlinedLimb(points, color, alpha = 1, width = 7) {
+function drawOutlinedLimb(points, color, alpha = 1, width = 7, outlineExtra = 4) {
   ctx.save();
   ctx.globalAlpha *= alpha;
   ctx.beginPath();
   ctx.moveTo(points[0][0], points[0][1]);
   for (let index = 1; index < points.length; index++) ctx.lineTo(points[index][0], points[index][1]);
-  ctx.strokeStyle = '#080d19'; ctx.lineWidth = width + 4; ctx.stroke();
+  ctx.strokeStyle = '#080d19'; ctx.lineWidth = width + outlineExtra; ctx.stroke();
   ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
   ctx.restore();
 }
@@ -2773,6 +2804,30 @@ function drawPlayer(p, dt) {
   const doubleJumpProgress = doubleJumpActive ? p.visualDoubleJumpAge * p.visualDoubleJumpAge * (3 - 2 * p.visualDoubleJumpAge) : 0;
   const doubleJumpTuck = doubleJumpActive ? Math.sin(doubleJumpProgress * Math.PI) : 0;
   if (doubleJumpActive) keyPose = fighterStatePose(p, sampleKeyframes(ONESHOT_KEYFRAMES.doubleJump, doubleJumpProgress), 'jump', doubleJumpProgress, p.visualDoubleJumpAge);
+  const poseTransitionKey = `${action}:${phase || 'none'}:${visualVariant || 'base'}:${doubleJumpActive ? 'double' : 'normal'}`;
+  if (p.poseTransitionKey !== poseTransitionKey) {
+    p.poseTransitionKey = poseTransitionKey;
+    p.poseTransitionFrom = p.displayedKeyPose ? { ...p.displayedKeyPose } : null;
+    p.poseTransitionAge = 0;
+  } else if (p.hitstop <= 0) {
+    p.poseTransitionAge = (p.poseTransitionAge || 0) + dt * 1000;
+  }
+  if (keyPose) {
+    const style = window.NEON_MOTION?.styleFor(fighter.id) || { entryMs: 48, phaseMs: 26, activeMs: 18 };
+    const changingAction = p.poseTransitionKey?.split(':', 1)[0] !== p.previousPoseAction;
+    const duration = phase === 'active' ? style.activeMs : changingAction ? style.entryMs : style.phaseMs;
+    const linearMix = duration > 0 ? clamp((p.poseTransitionAge || 0) / duration, 0, 1) : 1;
+    if (linearMix < 1 && p.poseTransitionFrom) {
+      const smoothMix = linearMix * linearMix * (3 - 2 * linearMix);
+      keyPose = blendKeyPose(p.poseTransitionFrom, keyPose, smoothMix);
+    } else {
+      p.poseTransitionFrom = null;
+    }
+    p.displayedKeyPose = keyPose;
+  } else {
+    p.displayedKeyPose = null;
+  }
+  p.previousPoseAction = action;
   let scaleX = 1, scaleY = 1, rotation = 0, bodyX = 0, bodyY = bob;
   if (attack) {
     const anticipation = smashPose ? 1.45 : tiltPose ? .78 : 1;
@@ -3156,8 +3211,10 @@ function drawPlayer(p, dt) {
     backKnee[0] += p.face * (authoredJoints.backKneeX || 0) * jointWeight;
     backKnee[1] += (authoredJoints.backKneeY || 0) * jointWeight;
   }
-  drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4);
-  drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5);
+  const crowding = window.NEON_READABILITY?.crowding(p, players) || 0;
+  const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding);
+  drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4,silhouetteExtra);
+  drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5,silhouetteExtra);
   let frontX = p.face * 23, frontY = 3, backX = -p.face * 18, backY = 7;
     if (attack) {
     const windup = phase === 'startup' ? progress : 0, extension = Math.max(0, strike);
@@ -3285,13 +3342,13 @@ function drawPlayer(p, dt) {
     backElbow[0] += p.face * (authoredJoints.backElbowX || 0) * jointWeight;
     backElbow[1] += (authoredJoints.backElbowY || 0) * jointWeight;
   }
-  drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4);
-  drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5);
+  drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4,silhouetteExtra);
+  drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5,silhouetteExtra);
 
   const bodyColor = renderColor;
   const headY=bodyCenterY-bodyHeight*.33,headRadius=fighter.id==='blaze'?13:12,torsoBottom=bodyCenterY+bodyHeight*.43;
   ctx.shadowBlur=hitFlash?8:0;ctx.shadowColor=renderColor;ctx.lineCap='round';
-  ctx.strokeStyle='#080d19';ctx.lineWidth=10;ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
+  ctx.strokeStyle='#080d19';ctx.lineWidth=10+(silhouetteExtra-4);ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=5;ctx.stroke();ctx.shadowBlur=0;
   ctx.beginPath();
   if(fighter.id==='volt'){
@@ -3304,7 +3361,7 @@ function drawPlayer(p, dt) {
   }else{
     ctx.moveTo(0,headY-headRadius*1.25);ctx.lineTo(headRadius,headY-headRadius*.2);ctx.lineTo(headRadius*.58,headY+headRadius);ctx.lineTo(0,headY+headRadius*.72);ctx.lineTo(-headRadius*.58,headY+headRadius);ctx.lineTo(-headRadius,headY-headRadius*.2);ctx.closePath();
   }
-  ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8;ctx.fill();ctx.stroke();
+  ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8+(silhouetteExtra-4);ctx.fill();ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=4;ctx.stroke();
   ctx.strokeStyle=fullBodyFlash?'#101522':action==='parrySuccess'?'#fff36b':'#f7fbff';ctx.shadowBlur=action==='parrySuccess'?12:0;ctx.shadowColor='#fff36b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();ctx.shadowBlur=0;
   if (action === 'dash' || action === 'pivot' || action === 'dashAttack') {

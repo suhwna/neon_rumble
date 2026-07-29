@@ -31,7 +31,19 @@
     return 'neutral';
   }
 
-  const api = Object.freeze({ statePriority, layerOrder, cue });
+  function crowding(player, players, radiusX = 76, radiusY = 68) {
+    if (!player || player.eliminated || player.respawn > 0) return 0;
+    let nearby = 0;
+    for (const other of players || []) {
+      if (!other || other === player || other.i === player.i || other.eliminated || other.respawn > 0) continue;
+      const dx = Math.abs((Number(other.x) || 0) - (Number(player.x) || 0));
+      const dy = Math.abs((Number(other.y) || 0) - (Number(player.y) || 0));
+      if (dx <= radiusX && dy <= radiusY) nearby++;
+    }
+    return Math.min(3, nearby);
+  }
+
+  const api = Object.freeze({ statePriority, layerOrder, cue, crowding });
   root.NEON_READABILITY = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

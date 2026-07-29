@@ -2583,17 +2583,39 @@ test('KO and disconnect release both sides of a grab', () => {
   assert.equal(disconnect.players[0].grabbing, null); assert.equal(disconnect.players[1].grabbedBy, null);
 });
 
-test('boomerang reverses once and cannot hit the same target every frame', () => {
+test('BOLT boomerang disappears immediately after hitting an enemy', () => {
   const world = worldWith(), target = world.players[1];
   target.invincible = 0;
-  world.entities.push({ id: 99, type: 'projectile', owner: 0, kind: 'boomerang', x: target.x, y: target.y, vx: 120, vy: 0, damage: 6, kx: 120, ky: 80, life: 50, color: '#fff', returnDamageScale: .62, hitPlayers: [] });
+  world.entities.push({ id: 99, type: 'projectile', owner: 0, kind: 'boomerang', x: target.x, y: target.y, vx: 0, vy: 0, damage: 6, kx: 120, ky: 80, life: 70, color: '#fff', returnDamageScale: .62, hitPlayers: [] });
   stepWorld(world, { 0: frame(1), 1: frame(1) });
-  const entity = world.entities[0], firstDamage = target.damage;
-  assert.equal(entity.returning, true); assert.equal(entity.vx, -120); assert.ok(firstDamage > 0);
-  assert.ok(Math.abs(entity.damage - 3.72) < 1e-9);
-  assert.ok(entity.kx < 120 && entity.ky < 80);
+  assert.ok(target.damage > 0);
+  assert.equal(world.entities.some(entity => entity.id === 99), false);
+});
+
+test('simultaneous attack and special inputs resolve to one deterministic action', () => {
+  const special = worldWith(), fighter = special.players[0];
+  fighter.ultimateMeter = 0;
+  stepWorld(special, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+  assert.equal(fighter.action?.name, 'specialNeutral');
+  assert.notEqual(fighter.action?.name, 'groundNeutral');
+
+  const ultimate = worldWith(), caster = ultimate.players[0];
+  caster.ultimateMeter = 100;
+  stepWorld(ultimate, { 0: frame(1, BUTTONS.ATTACK | BUTTONS.SPECIAL), 1: frame(1) });
+  assert.equal(caster.action?.name, 'ultimate');
+  assert.equal(caster.ultimateMeter, 0);
+});
+
+test('a fresh shield chord cannot leak a delayed neutral special', () => {
+  const world = worldWith(), player = world.players[0];
+  stepWorld(world, { 0: frame(1, BUTTONS.SHIELD | BUTTONS.SPECIAL), 1: frame(1) });
+  assert.equal(player.shielding, true);
+  assert.equal(player.actionBuffer, null);
+
   stepWorld(world, { 0: frame(2), 1: frame(2) });
-  assert.equal(entity.vx, -120); assert.equal(target.damage, firstDamage);
+  for (let seq = 3; seq <= 16; seq++) stepWorld(world, { 0: frame(seq), 1: frame(seq) });
+  assert.equal(player.action, null);
+  assert.equal(world.entities.length, 0);
 });
 
 test('sudden death ends on the first KO and training reset clears transient state', () => {
