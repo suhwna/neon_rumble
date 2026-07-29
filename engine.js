@@ -6,6 +6,7 @@ const {
   chooseCombatPlan,
   fighterDefenseChance,
   preferredCombatRange,
+  situationalAttackChoice,
   boltBoomerangWanted
 } = require('./cpu-policy');
 const { selectRecoveryTarget, isOffstage } = require('./cpu-navigation');
@@ -2589,7 +2590,9 @@ function decideCpuInput(world, player, difficulty) {
   const edgeClearance = support
     ? toward < 0 ? player.x - support.x : support.x + support.w - player.x
     : Infinity;
-  const riskyEdgePursuit = targetOffstage && !!support && edgeClearance < 110;
+  const edgeSafety = player.characterId === 'blaze' ? 150 : 110;
+  const riskyEdgePursuit = targetOffstage && !!support && edgeClearance < edgeSafety;
+  const unsafeForwardStep = !!support && edgeClearance < (player.characterId === 'blaze' ? 125 : 72);
   const threat = findIncomingThreat(world, player, target);
   const projectileFighter = !!characterOf(player).moves.specialNeutral.projectile;
   if (world.tick >= brain.planUntil) {
@@ -2672,8 +2675,8 @@ function decideCpuInput(world, player, difficulty) {
   }
   if (!chosen && canAct && player.characterId === 'blaze' && player.grounded
     && !targetOffstage && !target.shielding && distance > 115 && distance < 250
-    && edgeClearance > 145 && world.tick >= (brain.armoredApproachUntil || 0)
-    && world.rng() < (difficulty === 'hard' ? .38 : .22)) {
+    && edgeClearance > 170 && world.tick >= (brain.armoredApproachUntil || 0)
+    && (targetRecovering || world.rng() < (difficulty === 'hard' ? .5 : .3))) {
     // BLAZE is too slow to win a pure footrace. Its authored side special is
     // the safe armored commitment for crossing mid range, but only when there
     // is stage behind it and the target is not waiting with a shield.
@@ -2702,6 +2705,22 @@ function decideCpuInput(world, player, difficulty) {
       actionHoldFrames = chargeFrames;
     }
   }
+  if (!chosen && canAct && player.characterId === 'blaze' && player.grounded
+    && !targetOffstage && !target.shielding && Math.abs(dy) < 82) {
+    // Lead the target by roughly BLAZE's normal startup instead of swinging at
+    // its old position. At mid range this branch keeps closing; once the
+    // predicted gap enters the real limb reach, the same run becomes a dash
+    // attack or a deliberate side normal.
+    const predictedX = target.x + clamp(target.vx * .13, -68, 68);
+    const predictedGap = Math.abs(predictedX - player.x);
+    const interceptToward = Math.sign(predictedX - player.x || toward);
+    if (predictedGap <= 112) {
+      const vertical = dy < -34 ? -1 : 0;
+      chosen = cpuInput(world, vertical ? 0 : interceptToward, vertical, BUTTONS.ATTACK);
+    } else if (predictedGap < 270) {
+      chosen = cpuInput(world, unsafeForwardStep ? 0 : interceptToward, 0);
+    }
+  }
   if (!chosen && canAct && distance < 62 && target.shielding && world.rng() < combatProfile.accuracy) {
     chosen = cpuInput(world, toward, 0, BUTTONS.GRAB);
   }
@@ -2721,6 +2740,23 @@ function decideCpuInput(world, player, difficulty) {
     else {
       const vertical = dy < -34 ? -1 : dy > 42 ? 1 : 0;
       chosen = cpuInput(world, vertical ? 0 : toward, vertical, BUTTONS.ATTACK);
+    }
+  }
+  if (!chosen && canAct) {
+    const situational = situationalAttackChoice({
+      grounded: player.grounded,
+      distance,
+      verticalGap: dy,
+      targetGrounded: target.grounded,
+      targetVy: target.vy,
+      targetActionName: target.actionName,
+      targetKnockdownFrames: target.knockdownFrames,
+      targetLandingLag: target.landingLag,
+      nearbyEnemies
+    });
+    if (situational) {
+      chosen = cpuInput(world, situational.horizontal, situational.vertical, BUTTONS.ATTACK);
+      brain.utilityCooldownUntil = Math.max(brain.utilityCooldownUntil || 0, world.tick + 24);
     }
   }
   if (!chosen && canAct && player.grounded && target.damage < 78
@@ -2783,7 +2819,8 @@ function decideCpuInput(world, player, difficulty) {
       chosen = cpuInput(world, vertical ? 0 : toward, vertical, useSpecial ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
     }
   }
-  if (!chosen && canAct && distance < 205 && Math.abs(dy) < 100
+  const mediumPressureRange = player.characterId === 'blaze' ? 158 : 205;
+  if (!chosen && canAct && distance < mediumPressureRange && Math.abs(dy) < 100
     && world.rng() < aggression * (pressuring ? .92 : .72)) {
     const useSpecial = !riskyEdgePursuit && world.rng() < (brain.plan === 'zone' ? .34 : .2);
     chosen = cpuInput(world, riskyEdgePursuit ? 0 : toward, 0, useSpecial ? BUTTONS.SPECIAL : BUTTONS.ATTACK);
@@ -2805,7 +2842,7 @@ function decideCpuInput(world, player, difficulty) {
       pressuring,
       projectileFighter
     });
-    const move = riskyEdgePursuit ? 0 : distance > preferredRange + 30 ? toward : distance < preferredRange - 28 ? -toward : 0;
+    const move = riskyEdgePursuit || unsafeForwardStep ? 0 : distance > preferredRange + 30 ? toward : distance < preferredRange - 28 ? -toward : 0;
     const jump = target.y < player.y - 95 && player.grounded && world.rng() < combatProfile.accuracy * .55;
     chosen = cpuInput(world, move, jump ? -1 : 0);
   }

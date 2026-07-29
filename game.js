@@ -138,6 +138,7 @@ const keyboardIntent = new window.NEON_INPUT.KeyboardIntentTracker();
 const inputTransport = new window.NEON_INPUT.InputTransportPolicy(runtimeMetrics);
 const audioFeedback = new window.NEON_AUDIO.AudioFeedback();
 const runtimeMonitor = new window.NEON_RUNTIME_MONITOR.RuntimeMonitor(performance.now());
+const visualTestMode = new URLSearchParams(location.search).get('visualTest') === '1';
 let visualFixtureActive = false;
 const waitingUiNodes = [
   [roomSettings, document.querySelector('#waiting-settings-mount')],
@@ -502,9 +503,10 @@ async function refreshRoomDirectory() {
   if (response?.ok) renderRoomDirectory(response.rooms || []);
 }
 
-socket.on('connect', initializeIdentity);
+socket.on('connect', () => { if (!visualTestMode) initializeIdentity(); });
 socket.on('connect_error', () => setError('게임 서버에 연결할 수 없습니다.'));
 socket.on('room:state', next => {
+  if (visualFixtureActive) return;
   if (room?.code === next.code) {
     const previousIds = new Set(room.players.map(player => player.clientId));
     const nextIds = new Set(next.players.map(player => player.clientId));
@@ -515,12 +517,12 @@ socket.on('room:state', next => {
   }
   room = next; rules = next.rules; renderLobby();
 });
-socket.on('rooms:changed', () => { if (!room && state === 'menu') refreshRoomDirectory(); });
-socket.on('queue:state', data => { queueBar.classList.remove('hidden'); document.querySelector('#queue-status').textContent = `${data.position}번째 · ${Math.floor(data.elapsedMs / 1000)}초`; });
-socket.on('match:found', data => { myIndex = data.index; saveSession({ code: data.code, resumeToken: data.resumeToken }); queueBar.classList.add('hidden'); });
-socket.on('match:start', payload => { room = payload.room; rules = room.rules; if (room.demo) myIndex = -1; waitingRoom.classList.add('hidden'); beginMatch(payload.snapshot); });
-socket.on('state:snapshot', receiveSnapshot);
-socket.on('match:end', payload => { receiveSnapshot(payload.snapshot); showResult(payload.winner); });
+socket.on('rooms:changed', () => { if (!visualFixtureActive && !room && state === 'menu') refreshRoomDirectory(); });
+socket.on('queue:state', data => { if (visualFixtureActive) return; queueBar.classList.remove('hidden'); document.querySelector('#queue-status').textContent = `${data.position}번째 · ${Math.floor(data.elapsedMs / 1000)}초`; });
+socket.on('match:found', data => { if (visualFixtureActive) return; myIndex = data.index; saveSession({ code: data.code, resumeToken: data.resumeToken }); queueBar.classList.add('hidden'); });
+socket.on('match:start', payload => { if (visualFixtureActive) return; room = payload.room; rules = room.rules; if (room.demo) myIndex = -1; waitingRoom.classList.add('hidden'); beginMatch(payload.snapshot); });
+socket.on('state:snapshot', snapshot => { if (!visualFixtureActive) receiveSnapshot(snapshot); });
+socket.on('match:end', payload => { if (visualFixtureActive) return; receiveSnapshot(payload.snapshot); showResult(payload.winner); });
 
 function enterRoom(nextRoom, warmupSnapshot = null) {
   room = nextRoom; rules = room.rules; state = room.playing ? 'playing' : 'waiting';
@@ -3689,7 +3691,7 @@ function playerTag(player){
 }
 function formatTime(ticks){if(rules.mode==='training')return '∞';const seconds=Math.max(0,Math.ceil(ticks/60));return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;}
 
-if (new URLSearchParams(location.search).get('visualTest') === '1') {
+if (visualTestMode) {
   window.__NEON_SET_VISUAL_FIXTURE__ = (fixture = 'motion-grid') => {
     const built = window.NEON_VISUAL_FIXTURES.build(fixture, {
       fighters: FIGHTERS, stages: STAGES, defaultRules: DEFAULT_RULES, shieldMax: SHIELD_MAX

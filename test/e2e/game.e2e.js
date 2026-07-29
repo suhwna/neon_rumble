@@ -93,7 +93,7 @@ test('fighter silhouettes and four-player impacts stay visually readable', async
 test('every authored move renders distinct startup, active, and recovery silhouettes', async ({ page, baseURL }) => {
   const crypto = require('node:crypto');
   const actions = [
-    'groundNeutral', 'groundSide', 'groundUp', 'groundDown', 'dashAttack',
+    'groundNeutral', 'groundJab2', 'groundJab3', 'groundSide', 'groundUp', 'groundDown', 'dashAttack',
     'airNeutral', 'airForward', 'airBack', 'airUp', 'airDown',
     'specialNeutral', 'specialSide', 'specialUp', 'specialDown'
   ];

@@ -57,6 +57,8 @@
   const PROFILES = Object.freeze({
     volt: Object.freeze({
       groundNeutral: profile([8, 0, -.08, 17, -2, -8, 5, 7, 0, -8, 0, .04, -.03]),
+      groundJab2: profile([10, -1, -.12, 21, -5, -10, 7, 10, 1, -10, 2, .06, -.04]),
+      groundJab3: profile([15, 1, -.19, 28, -6, -14, 10, 16, 2, -17, 4, .12, -.09]),
       groundSide: profile([14, 1, -.16, 24, -5, -12, 8, 13, 0, -12, 0, .1, -.08]),
       groundUp: profile([3, -7, -.04, 8, -25, -7, -17, 4, 7, -5, 3, -.05, .13]),
       groundDown: profile([9, 7, -.11, 7, 8, -14, -3, 28, 0, -12, 0, .13, -.13]),
@@ -73,6 +75,8 @@
     }),
     blaze: Object.freeze({
       groundNeutral: profile([9, 5, -.07, 20, -1, 10, 7, 11, 0, -13, 0, .12, -.11]),
+      groundJab2: profile([12, 6, -.11, 23, 2, 14, 9, 14, 1, -16, 1, .16, -.14]),
+      groundJab3: profile([19, 8, -.22, 32, -4, 25, 10, 20, 2, -23, 2, .25, -.2]),
       groundSide: profile([17, 7, -.19, 29, -3, 23, 8, 17, 0, -19, 0, .22, -.18]),
       groundUp: profile([3, -8, -.03, 11, -27, -9, -22, 10, 4, -12, 2, .03, .15]),
       groundDown: profile([4, 11, .02, 13, 9, -14, 8, 23, 0, -24, 0, .24, -.22]),
@@ -89,6 +93,8 @@
     }),
     bolt: Object.freeze({
       groundNeutral: profile([7, 1, .06, 16, -5, -9, 6, 8, 2, -8, 0, .05, -.03]),
+      groundJab2: profile([9, 0, .13, 17, -8, -12, 8, 13, 4, -10, 3, .07, -.04]),
+      groundJab3: profile([14, 4, .24, 20, -3, -17, -7, 18, 8, -19, 6, .16, -.13]),
       groundSide: profile([11, 2, -.12, 18, -7, -14, 10, 18, 2, -14, 6, .1, -.07]),
       groundUp: profile([3, -7, .08, 8, -17, -12, -13, 17, 12, -8, 3, -.02, .13]),
       groundDown: profile([2, 8, .18, 12, 8, -13, -7, 22, 5, -21, 3, .14, -.13]),
@@ -105,6 +111,8 @@
     }),
     nova: Object.freeze({
       groundNeutral: profile([6, -2, -.04, 18, -9, -11, 6, 6, 0, -9, 0, -.02, .06]),
+      groundJab2: profile([8, -3, -.08, 21, -12, -13, 8, 9, 2, -11, 2, -.03, .08]),
+      groundJab3: profile([14, -3, -.16, 29, -14, -18, 10, 15, 5, -18, 6, .01, .12]),
       groundSide: profile([12, -2, -.13, 25, -11, -15, 9, 14, 4, -16, 5, .02, .06]),
       groundUp: profile([2, -10, -.05, 8, -28, -9, -20, 7, 10, -8, 6, -.08, .18]),
       groundDown: profile([6, 6, -.08, 19, 8, -20, 6, 24, 0, -18, 0, .12, -.1]),
@@ -123,6 +131,8 @@
 
   const ACTION_JOINTS = Object.freeze({
     groundNeutral: { frontElbowX: -5, frontElbowY: -7, backElbowX: -2, backElbowY: 5, frontKneeX: 3, frontKneeY: -2 },
+    groundJab2: { frontElbowX: -7, frontElbowY: -9, backElbowX: 2, backElbowY: 6, frontKneeX: 4, frontKneeY: -3, backKneeX: -2 },
+    groundJab3: { frontElbowX: -10, frontElbowY: -8, backElbowX: -5, backElbowY: 9, frontKneeX: 7, frontKneeY: -5, backKneeX: -5 },
     groundSide: { frontElbowX: -8, frontElbowY: -10, backElbowX: -4, backElbowY: 7, frontKneeX: 6, frontKneeY: -4, backKneeX: -4 },
     groundUp: { frontElbowX: 9, frontElbowY: 4, backElbowX: -8, backElbowY: 5, frontKneeX: 4, backKneeX: -4 },
     groundDown: { frontElbowY: 5, backElbowY: -4, frontKneeX: -7, frontKneeY: -12, backKneeX: 5, backKneeY: -4 },

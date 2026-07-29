@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const MOTION = require('../motion-data.js');
 
 const ACTIONS = [
-  'groundNeutral', 'groundSide', 'groundUp', 'groundDown', 'dashAttack',
+  'groundNeutral', 'groundJab2', 'groundJab3', 'groundSide', 'groundUp', 'groundDown', 'dashAttack',
   'airNeutral', 'airForward', 'airBack', 'airUp', 'airDown',
   'specialNeutral', 'specialSide', 'specialUp', 'specialDown'
 ];

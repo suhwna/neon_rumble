@@ -1,5 +1,6 @@
 const { BUTTONS } = require('./content');
 const { selectRecoveryTarget } = require('./cpu-navigation');
+const { novaRecoveryChargeTarget } = require('./cpu-policy');
 
 const intent = (horizontal = 0, vertical = 0, actions = 0) => ({ horizontal, vertical, actions });
 
@@ -22,6 +23,17 @@ function planCpuRecovery(world, player, profile, bounds) {
   const emergency = player.y > bounds.bottom - 185
     || player.x < -bounds.marginX + 150
     || player.x > bounds.worldWidth + bounds.marginX - 150;
+
+  const novaWarpCharge = player.characterId === 'nova'
+    && player.action?.name === 'specialUp'
+    && player.action?.move?.distanceCharge;
+  if (novaWarpCharge) {
+    const releaseAt = novaRecoveryChargeTarget({ horizontalGap, heightBelow, emergency });
+    const progress = Math.max(0, Math.min(1, Number(player.action.chargeProgress) || 0));
+    // Release once the preview star has covered the required route. Holding to
+    // maximum on every recovery made NOVA overshoot ledges and waste drift.
+    return intent(toward, -1, progress < releaseAt ? BUTTONS.SPECIAL : 0);
+  }
 
   if (!player.freefall && player.jumps > 0 && (falling || heightBelow > -70 || emergency)) {
     return intent(toward, -1);

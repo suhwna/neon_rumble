@@ -9,7 +9,7 @@ function blazeTargetPriorityBonus(targetDamage) {
 }
 
 function blazeAirNeutralWanted({ distance, verticalGap, nearbyEnemies, targetAttacking, roll }) {
-  if (distance > 104 || Math.abs(verticalGap) > 74) return false;
+  if (distance > 112 || Math.abs(verticalGap) > 80) return false;
   const urgency = nearbyEnemies >= 2 || targetAttacking ? .82 : .52;
   return roll < urgency;
 }
@@ -27,6 +27,10 @@ function chooseCombatPlan({
 }) {
   if (targetShielding || targetVulnerable || quietFrames >= 54) return 'pressure';
   if (playerDamage > targetDamage + 38) return 'bait';
+  // BLAZE's projectile is a deliberate long-range callout, not its default
+  // neutral. Zoning at mid range made the heavyweight stop just outside the
+  // reach where its armored approach and large normals become useful.
+  if (fighterId === 'blaze') return projectileReady && distance >= 315 ? 'zone' : 'pressure';
   if (projectileReady && distance > 145) return 'zone';
   return 'pressure';
 }
@@ -36,9 +40,40 @@ function fighterDefenseChance(baseChance, fighterId, damage, forcingInitiative =
 }
 
 function preferredCombatRange({ fighterId, plan, pressuring, projectileFighter }) {
+  if (fighterId === 'blaze') {
+    if (pressuring) return 88;
+    if (plan === 'zone' && projectileFighter) return 215;
+    return 124;
+  }
   if (pressuring) return 78;
   if (plan === 'zone' && projectileFighter) return 165;
   return 112;
+}
+
+function situationalAttackChoice({
+  grounded, distance, verticalGap, targetGrounded, targetVy = 0,
+  targetActionName = '', targetKnockdownFrames = 0, targetLandingLag = 0,
+  nearbyEnemies = 0
+}) {
+  if (grounded) {
+    const descendingAbove = !targetGrounded && verticalGap < -28 && targetVy >= -90;
+    if (descendingAbove && distance < 112) return Object.freeze({ horizontal: 0, vertical: -1, reason: 'anti-air' });
+    const lowTarget = targetGrounded && (
+      targetKnockdownFrames > 0
+      || targetLandingLag >= 6
+      || ['crouch', 'crawl', 'spotDodge'].includes(targetActionName)
+    );
+    if (lowTarget && distance > 48 && distance < 112) return Object.freeze({ horizontal: 0, vertical: 1, reason: 'low-catch' });
+    return null;
+  }
+  const airScramble = distance < 76 && Math.abs(verticalGap) < 50 && nearbyEnemies >= 1;
+  return airScramble ? Object.freeze({ horizontal: 0, vertical: 0, reason: 'air-scramble' }) : null;
+}
+
+function novaRecoveryChargeTarget({ horizontalGap, heightBelow, emergency = false }) {
+  const horizontalNeed = Math.max(0, Math.min(1, (Number(horizontalGap) - 36) / 220));
+  const verticalNeed = Math.max(0, Math.min(1, (Number(heightBelow) + 28) / 190));
+  return Math.max(.32, Math.min(.9, Math.max(horizontalNeed, verticalNeed, emergency ? .56 : 0)));
 }
 
 function boltBoomerangWanted({ plan, tick, cooldownUntil, difficulty, roll }) {
@@ -54,5 +89,7 @@ module.exports = {
   chooseCombatPlan,
   fighterDefenseChance,
   preferredCombatRange,
+  situationalAttackChoice,
+  novaRecoveryChargeTarget,
   boltBoomerangWanted
 };

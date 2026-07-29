@@ -28,3 +28,20 @@ test('CPU recovery uses up special after the air jump is gone', () => {
   assert.equal(planned.vertical, -1);
   assert.ok(planned.actions & BUTTONS.SPECIAL);
 });
+
+test('NOVA releases a charged recovery when the required route is covered', () => {
+  const world = { platforms, rng: () => .9 };
+  const player = {
+    characterId: 'nova',
+    x: 110, y: 590, vy: 0, face: 1, ledge: null, stun: 0,
+    freefall: false, jumps: 0, recoveryAvailable: true, airDodgeAvailable: true,
+    action: {
+      name: 'specialUp',
+      chargeProgress: .88,
+      move: { distanceCharge: true }
+    }
+  };
+  const planned = planCpuRecovery(world, player, profile, bounds);
+  assert.equal(planned.vertical, -1);
+  assert.equal(planned.actions & BUTTONS.SPECIAL, 0);
+});

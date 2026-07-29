@@ -8,6 +8,8 @@ const {
   chooseCombatPlan,
   fighterDefenseChance,
   preferredCombatRange,
+  situationalAttackChoice,
+  novaRecoveryChargeTarget,
   boltBoomerangWanted
 } = require('../cpu-policy');
 
@@ -45,7 +47,42 @@ test('shared combat policy keeps character power out of AI-only spacing rules', 
   assert.equal(fighterDefenseChance(.72, 'blaze', 105), fighterDefenseChance(.72, 'volt', 105));
   assert.equal(preferredCombatRange({
     fighterId: 'blaze', plan: 'bait', pressuring: false, projectileFighter: true
-  }), 112);
+  }), 124);
+});
+
+test('BLAZE closes mid range and reserves zoning for deliberate long range', () => {
+  assert.equal(chooseCombatPlan({
+    fighterId: 'blaze', targetShielding: false, targetVulnerable: false,
+    quietFrames: 8, projectileReady: true, distance: 220,
+    playerDamage: 40, targetDamage: 50
+  }), 'pressure');
+  assert.equal(chooseCombatPlan({
+    fighterId: 'blaze', targetShielding: false, targetVulnerable: false,
+    quietFrames: 8, projectileReady: true, distance: 380,
+    playerDamage: 40, targetDamage: 50
+  }), 'zone');
+});
+
+test('situational normals answer anti-air, low catch, and real air scrambles', () => {
+  assert.equal(situationalAttackChoice({
+    grounded: true, distance: 86, verticalGap: -55, targetGrounded: false, targetVy: 120
+  }).reason, 'anti-air');
+  assert.equal(situationalAttackChoice({
+    grounded: true, distance: 84, verticalGap: 8, targetGrounded: true, targetLandingLag: 8
+  }).reason, 'low-catch');
+  assert.equal(situationalAttackChoice({
+    grounded: false, distance: 62, verticalGap: 18, targetGrounded: false, nearbyEnemies: 1
+  }).reason, 'air-scramble');
+  assert.equal(situationalAttackChoice({
+    grounded: false, distance: 110, verticalGap: 18, targetGrounded: false, nearbyEnemies: 1
+  }), null);
+});
+
+test('NOVA recovery charge scales with the route but releases before maximum', () => {
+  const shortRoute = novaRecoveryChargeTarget({ horizontalGap: 65, heightBelow: 10 });
+  const longRoute = novaRecoveryChargeTarget({ horizontalGap: 230, heightBelow: 150 });
+  assert.ok(shortRoute < longRoute);
+  assert.ok(longRoute <= .9);
 });
 
 test('BOLT boomerang plan observes tactical intent and a real decision cooldown', () => {
