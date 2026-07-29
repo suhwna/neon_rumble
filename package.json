@@ -12,6 +12,7 @@
     "test:e2e:update": "playwright test --update-snapshots",
     "test:e2e:soak": "playwright test --config=playwright.soak.config.js",
     "audit:ai": "node scripts/run-ai-audit.js",
+    "audit:frames": "node scripts/run-frame-audit.js",
     "version:check": "node --test test/version.test.js"
   },
   "engines": {

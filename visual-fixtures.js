@@ -43,6 +43,7 @@
         ledge: null, grabbedBy: null, grabbing: null, landingLag: 0,
         tumbling: false, freefall: false, knockdownFrames: 0,
         ultimateMeter: 45 + index * 12,
+        flashUntil: action === 'groundHit' ? Number.POSITIVE_INFINITY : 0,
         impactVisualUntil: action === 'groundHit' ? Number.POSITIVE_INFINITY : 0,
         impactVisualStrength: options.impactStrength || 1,
         impactVisualAngle: options.impactAngle || 0

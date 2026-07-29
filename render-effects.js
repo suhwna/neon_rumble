@@ -6,8 +6,9 @@
     ctx.save();
     for (const particle of entries) {
       const fade = clamp(particle.life / particle.duration, 0, 1);
-      const size = Math.max(1.6, particle.size * (.48 + fade * .52));
-      ctx.globalAlpha = Math.min(1, fade * fade * 1.12);
+      const impact = particle.kind === 'impact';
+      const size = Math.max(impact ? 1.25 : 1.6, particle.size * (impact ? .24 + fade * .76 : .48 + fade * .52));
+      ctx.globalAlpha = Math.min(1, impact ? fade * 1.38 : fade * fade * 1.12);
       ctx.fillStyle = particle.color;
       ctx.beginPath();
       ctx.arc(Math.round(particle.x), Math.round(particle.y), size * .52, 0, Math.PI * 2);

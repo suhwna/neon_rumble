@@ -40,13 +40,18 @@
       const duration = options.critical ? 0.14 : options.pummel ? 0.035 : 0.045 + amount * 0.025;
       const start = options.shield ? 330 : options.critical ? 92 : 205 - amount * 62;
       const end = options.shield ? 185 : options.critical ? 38 : Math.max(48, start * 0.42);
-      return this.tone(
+      const played = this.tone(
         start,
         duration,
         options.shield ? 'triangle' : options.sweet ? 'square' : 'sawtooth',
         Math.min(0.065, 0.024 + amount * 0.018),
         end
       );
+      if (played && !options.pummel) {
+        const clickFrequency = options.shield ? 920 : options.critical ? 540 : 720 + amount * 190;
+        this.tone(clickFrequency, options.critical ? .028 : .016, 'square', Math.min(.022, .008 + amount * .007), clickFrequency * .72);
+      }
+      return played;
     }
   }
 

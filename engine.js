@@ -11,6 +11,7 @@ const {
 const { selectRecoveryTarget, isOffstage } = require('./cpu-navigation');
 const { selectCpuTarget, findIncomingThreat } = require('./cpu-combat');
 const { planCpuRecovery } = require('./cpu-recovery');
+const { balanceMoveFrames, frameProfile, shieldStunFrames } = require('./frame-balance');
 
 const TICK_RATE = 60;
 const WORLD_W = 1280;
@@ -442,7 +443,7 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
   const knockbackScale = 1 + Math.max(0, chargeScale - 1) * 0.625;
   const angleShift = name === 'groundSide' ? clamp(Number(options.input?.vertical) || 0, -1, 1) : 0;
   const angleKyScale = angleShift < -.45 ? 1.24 : angleShift > .45 ? .58 : 1;
-  const move = {
+  const rawMove = {
     ...definition,
     name,
     staleKey: tilt ? `${name}:tilt` : variant === 'smash' ? `${name}:smash` : name,
@@ -452,6 +453,7 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
     angleShift,
     hitboxShiftY: angleShift * Math.min(18, definition.reachY * .24)
   };
+  const move = balanceMoveFrames(name, rawMove, tilt ? 'tilt' : variant);
   const beginCharged = !!options.beginCharged && !!move.chargeable;
   player.action = {
     name, move, variant: tilt ? 'tilt' : variant === 'smash' ? 'smash' : 'normal',
@@ -461,7 +463,7 @@ function startMove(world, player, name, chargeScale = 1, options = {}) {
     charging: beginCharged,
     charged: chargeScale > 1,
     chargeButton: options.chargeButton,
-    activated: false, startup: move.startup,
+    activated: false, startup: move.startup, contactKind: 'whiff',
     startedAirborne: !player.grounded,
     specialTurnaround: options.specialTurnaround || null,
     inputHorizontal: clamp(Number(options.input?.horizontal) || 0, -1, 1),
@@ -858,10 +860,12 @@ function hitPlayer(world, attacker, target, move, direction) {
   if (target.shielding && !move.shieldPoke) {
     const shieldDamage = move.damage * stale * shortHopMultiplier * Math.max(0, move.shieldDamageMultiplier ?? 1);
     target.shield = Math.max(0, target.shield - shieldDamage * 1.19);
-    target.shieldStun = Math.max(target.shieldStun || 0, Math.floor(shieldDamage * 0.8 * (move.name?.startsWith('air') || move.projectile ? 0.8 : 1) + 2));
+    const shieldMove = { ...move, damage: shieldDamage };
+    target.shieldStun = Math.max(target.shieldStun || 0, shieldStunFrames(shieldMove));
     const shieldPush = Math.min(145, (target.shieldStun + 1) * 9.9);
     target.vx = direction * shieldPush; attacker.vx -= direction * Math.min(170, 18 + shieldDamage * 6);
-    target.hitstop = Math.max(3, move.hitstop - 2); attacker.hitstop = 3;
+    target.hitstop = Math.max(3, move.hitstop - 2); attacker.hitstop = Math.max(attacker.hitstop || 0, move.blockLag || 3);
+    if (!move.projectile && attacker.action && attacker.action.name === move.name) attacker.action.contactKind = 'block';
     if (target.shield <= 0) {
       target.shield = SHIELD_MAX * .25; target.shielding = false; target.stun = 87; target.dizzyFrames = 87;
       target.shieldLock = 120; target.shieldHoldFrames = 0; target.shieldReleaseQueued = false;
@@ -899,6 +903,7 @@ function hitPlayer(world, attacker, target, move, direction) {
     attacker.hitstop = Math.max(attacker.hitstop || 0, Math.min(2, hitlag));
     target.hitstop = Math.max(target.hitstop || 0, Math.min(2, hitlag));
     target.lastDamager = attacker.i; target.hitId += 1;
+    if (!move.projectile && attacker.action && attacker.action.name === move.name) attacker.action.contactKind = 'hit';
     emit(world, 'hit', {
       attacker: attacker.i, player: target.i, damage, targetDamage: target.damage,
       comboCount: target.comboCount, comboMultiplier, x: move.contactX ?? target.x, y: move.contactY ?? target.y,
@@ -1015,6 +1020,7 @@ function hitPlayer(world, attacker, target, move, direction) {
   target.stun = armored ? 0 : Math.max(4, Math.round(baseHitstun * comboStunMultiplier));
   if (!armored) target.grounded = groundedFlinch;
   target.hitId += 1;
+  if (!move.projectile && attacker.action && attacker.action.name === move.name) attacker.action.contactKind = 'hit';
   if (!armored) {
     target.tumbling = !groundedFlinch;
     if (interruptedFreefall && !groundedFlinch) {
@@ -1222,6 +1228,14 @@ function processAction(world, player, input, previous) {
       const scale = 1 + chargeProgress * (maxDamageScale - 1);
       const knockbackScale = 1 + (scale - 1) * .625;
       move.damage *= scale; move.kx *= knockbackScale; move.ky *= knockbackScale;
+      const balanced = balanceMoveFrames(action.name, move, action.variant);
+      move.recovery = Math.max(move.recovery, balanced.recovery);
+      move.blockLag = balanced.blockLag;
+      move.hitCancelWindow = balanced.hitCancelWindow;
+      move.blockCancelWindow = balanced.blockCancelWindow;
+      move.whiffCancelWindow = balanced.whiffCancelWindow;
+      move.targetBlockDisadvantage = balanced.targetBlockDisadvantage;
+      move.targetWhiffCommitment = balanced.targetWhiffCommitment;
       action.chargeProgress = chargeProgress;
       action.chargeScale = scale; action.charging = false; action.charged = true;
       } else action.charged = true;
@@ -1242,8 +1256,14 @@ function processAction(world, player, input, previous) {
   const totalFrames = startup + move.active + move.recovery;
   const cancelIntent = !!player.actionBuffer || player.jumpBuffer > 0
     || (player.shieldBuffer > 0 && bit(input.buttons, BUTTONS.SHIELD));
-  const interruptible = action.name !== 'grab' && cancelIntent && move.cancelWindow > 0
-    && action.frame >= totalFrames - move.cancelWindow;
+  const contactCancelWindow = action.contactKind === 'hit'
+    ? move.hitCancelWindow
+    : action.contactKind === 'block'
+      ? move.blockCancelWindow
+      : move.whiffCancelWindow;
+  const cancelWindow = contactCancelWindow == null ? move.cancelWindow : contactCancelWindow;
+  const interruptible = action.name !== 'grab' && cancelIntent && cancelWindow > 0
+    && action.frame >= totalFrames - cancelWindow;
   if (action.frame >= totalFrames || interruptible) {
     if (move.jab && move.jab < 3) { player.jabStep = move.jab; player.jabTimer = JAB_CHAIN_WINDOW_FRAMES; }
     else if (move.jab === 3) { player.jabStep = 0; player.jabTimer = 0; }
@@ -3018,4 +3038,4 @@ function forfeitPlayer(world, index) {
   return true;
 }
 
-module.exports = { TICK_RATE, WORLD_W, WORLD_H, BLAST_MARGIN_X, BLAST_TOP, BLAST_BOTTOM, normalizeRules, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer };
+module.exports = { TICK_RATE, WORLD_W, WORLD_H, BLAST_MARGIN_X, BLAST_TOP, BLAST_BOTTOM, normalizeRules, createWorld, stepWorld, publicSnapshot, trainingCommand, forfeitPlayer, frameProfile };

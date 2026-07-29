@@ -810,8 +810,11 @@ function processEvents(events) {
       if (Number.isFinite(hitX) && Number.isFinite(hitY)) {
         const particleCount = ultimate ? 28 : event.type === 'parry' ? 18 : critical ? 22 : sweet ? 16 : event.type === 'shield-hit' ? 9 : pummel ? 7 : 12;
         const particleSpeed = ultimate ? 520 : 145 + impactStrength * (critical ? 215 : 135);
-        burst(hitX, hitY, impactColor, particleCount, particleSpeed, impactAngle, ultimate ? 2.05 : critical ? 1.8 : sweet ? 1.45 : pummel ? .88 : 1.22);
-        if (ultimate) burst(hitX, hitY, '#ffffff', 12, 370, impactAngle + Math.PI, 1.45);
+        if (event.type === 'hit' || pummel) {
+          impactBurst(hitX, hitY, impactColor, particleCount, particleSpeed, impactAngle, impactStrength, ultimate ? 1.65 : critical ? 1.45 : sweet ? 1.2 : pummel ? .74 : 1);
+        } else {
+          burst(hitX, hitY, impactColor, particleCount, particleSpeed, impactAngle, event.type === 'parry' ? 1.45 : 1);
+        }
         if (event.type === 'parry' || event.type === 'shield-hit') {
           const ringDuration = event.type === 'parry' ? .32 : .23;
           impactRings.push({
@@ -826,7 +829,7 @@ function processEvents(events) {
       }
       if (player) {
         const visualDuration = event.type === 'parry' ? 190 : critical || ultimate ? 170 : sweet ? 125 : pummel ? 70 : 92;
-        player.flashUntil = performance.now() + (event.type === 'parry' ? 190 : critical ? 240 : sweet ? 180 : pummel ? 100 : 145);
+        player.flashUntil = performance.now() + (event.type === 'parry' ? 160 : critical || ultimate ? 130 : sweet ? 105 : pummel ? 55 : 72);
         player.impactVisualUntil = performance.now() + visualDuration;
         player.impactVisualStrength = impactStrength;
         player.impactVisualAngle = impactAngle;
@@ -2213,13 +2216,13 @@ function keyframePoseFor(player, action, motion, phase, progress, attack, age, v
   return null;
 }
 
-function drawOutlinedLimb(points, color, alpha = 1, width = 7, outlineExtra = 4) {
+function drawOutlinedLimb(points, color, alpha = 1, width = 7, outlineExtra = 4, outlineColor = '#080d19') {
   ctx.save();
   ctx.globalAlpha *= alpha;
   ctx.beginPath();
   ctx.moveTo(points[0][0], points[0][1]);
   for (let index = 1; index < points.length; index++) ctx.lineTo(points[index][0], points[index][1]);
-  ctx.strokeStyle = '#080d19'; ctx.lineWidth = width + outlineExtra; ctx.stroke();
+  ctx.strokeStyle = outlineColor; ctx.lineWidth = width + outlineExtra; ctx.stroke();
   ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
   ctx.restore();
 }
@@ -3213,8 +3216,10 @@ function drawPlayer(p, dt) {
   }
   const crowding = window.NEON_READABILITY?.crowding(p, players) || 0;
   const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding);
-  drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4,silhouetteExtra);
-  drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5,silhouetteExtra);
+  const hitAccent = hitFlash && impactCue && (action === 'hit' || action === 'groundHit' || action === 'grabbedHit');
+  const silhouetteOutline = hitAccent ? '#f7fbff' : '#080d19';
+  drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
+  drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);
   let frontX = p.face * 23, frontY = 3, backX = -p.face * 18, backY = 7;
     if (attack) {
     const windup = phase === 'startup' ? progress : 0, extension = Math.max(0, strike);
@@ -3342,13 +3347,13 @@ function drawPlayer(p, dt) {
     backElbow[0] += p.face * (authoredJoints.backElbowX || 0) * jointWeight;
     backElbow[1] += (authoredJoints.backElbowY || 0) * jointWeight;
   }
-  drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4,silhouetteExtra);
-  drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5,silhouetteExtra);
+  drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
+  drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);
 
   const bodyColor = renderColor;
   const headY=bodyCenterY-bodyHeight*.33,headRadius=fighter.id==='blaze'?13:12,torsoBottom=bodyCenterY+bodyHeight*.43;
   ctx.shadowBlur=hitFlash?8:0;ctx.shadowColor=renderColor;ctx.lineCap='round';
-  ctx.strokeStyle='#080d19';ctx.lineWidth=10+(silhouetteExtra-4);ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
+  ctx.strokeStyle=silhouetteOutline;ctx.lineWidth=10+(silhouetteExtra-4);ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=5;ctx.stroke();ctx.shadowBlur=0;
   ctx.beginPath();
   if(fighter.id==='volt'){
@@ -3361,7 +3366,7 @@ function drawPlayer(p, dt) {
   }else{
     ctx.moveTo(0,headY-headRadius*1.25);ctx.lineTo(headRadius,headY-headRadius*.2);ctx.lineTo(headRadius*.58,headY+headRadius);ctx.lineTo(0,headY+headRadius*.72);ctx.lineTo(-headRadius*.58,headY+headRadius);ctx.lineTo(-headRadius,headY-headRadius*.2);ctx.closePath();
   }
-  ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle='#080d19';ctx.lineWidth=8+(silhouetteExtra-4);ctx.fill();ctx.stroke();
+  ctx.fillStyle=fullBodyFlash?'rgba(255,255,255,.94)':'rgba(7,13,25,.9)';ctx.strokeStyle=silhouetteOutline;ctx.lineWidth=8+(silhouetteExtra-4);ctx.fill();ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=4;ctx.stroke();
   ctx.strokeStyle=fullBodyFlash?'#101522':action==='parrySuccess'?'#fff36b':'#f7fbff';ctx.shadowBlur=action==='parrySuccess'?12:0;ctx.shadowColor='#fff36b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(p.face*1,headY-2);ctx.lineTo(p.face*(headRadius*.55),headY-3);ctx.stroke();ctx.shadowBlur=0;
   if (action === 'dash' || action === 'pivot' || action === 'dashAttack') {
@@ -3533,6 +3538,7 @@ function drawKoCinematics(){
   }
 }
 function burst(x,y,color,count,speed,direction=0,scale=1){const densityScale=particles.length>48?.36:particles.length>30?.64:1,drawCount=Math.max(2,Math.ceil(count*effectQuality*densityScale));for(let i=0;i<drawCount;i++){const forward=i<drawCount*.66,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?1.8:2.55),s=speed*(.3+Math.random()*.82),duration=.19+Math.random()*.15;particles.push({x:x+(Math.random()-.5)*7,y:y+(Math.random()-.5)*7,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%4===0?color:'#ffffff',size:(1.8+Math.random()*2.5)*scale,gravity:42+Math.random()*65});}if(particles.length>64)particles.splice(0,particles.length-64);}
+function impactBurst(x,y,color,count,speed,direction=0,strength=1,scale=1){const densityScale=particles.length>48?.42:particles.length>30?.7:1,drawCount=Math.max(3,Math.ceil(count*effectQuality*densityScale));for(let i=0;i<drawCount;i++){const forward=i<drawCount*.78,a=direction+(forward?0:Math.PI)+(Math.random()-.5)*(forward?.92:1.5),s=speed*(.56+Math.random()*.58),duration=.085+Math.random()*.075+Math.min(.035,strength*.012);particles.push({kind:'impact',x:x+(Math.random()-.5)*3,y:y+(Math.random()-.5)*3,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:duration,duration,color:i%3===0?color:'#ffffff',size:(1.55+Math.random()*1.9)*scale,gravity:18+Math.random()*38});}if(particles.length>64)particles.splice(0,particles.length-64);}
 function drawParticles(){window.NEON_RENDER_EFFECTS.particles(ctx,particles);}
 function drawBlastMarks(){window.NEON_RENDER_EFFECTS.blastMarks(ctx,blastMarks);}
 function drawShieldBreakEffects(){window.NEON_RENDER_EFFECTS.shieldBreaks(ctx,shieldBreakEffects,effectQuality);}
