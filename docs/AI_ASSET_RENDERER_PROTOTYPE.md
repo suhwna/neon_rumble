@@ -1,32 +1,36 @@
-# AI 에셋 하이브리드 렌더러 프로토타입
+# AI 스테이지 렌더러
 
-이 브랜치는 전투 판정과 관절식 Canvas 모션은 유지하면서, 생성형 이미지 에셋을
-배경과 캐릭터 부위에 선택적으로 합성하는 수직 시제품입니다.
+NEON RUMBLE은 AI 이미지와 Canvas 전투 렌더링을 제한적으로 결합합니다.
 
-## 현재 적용 범위
+## 적용 범위
 
-- Neon Deck, Sky Rail, Reactor Core: 생성형 배경 이미지
-- VOLT, BLAZE, BOLT, NOVA: 투명 배경의 생성형 헤드 파츠
-- 몸, 팔, 다리, 공격 자세: 기존 관절식 Canvas 렌더러
-- 충돌, 히트박스, 물리, 온라인 동기화: 기존 전투 엔진 그대로 유지
-- 이미지 로딩 실패 시: 기존 절차형 Canvas 그래픽으로 자동 대체
-- 배경: 카메라 확대와 분리된 화면 크기 캐시로 전체 구도와 렌더 성능 유지
+AI 이미지는 다음 두 영역에만 사용합니다.
 
-## 비교 방법
+- Neon Deck, Sky Rail, Reactor Core 배경
+- 각 스테이지의 바닥, 절벽, 통과 발판, 이동 발판
 
-- 하이브리드 렌더러: `http://localhost:4180/`
-- 기존 Canvas 렌더러: `http://localhost:4180/?art=legacy`
+캐릭터, HUD 초상화, 투사체, 공격·피격·필살기·궁극기 이펙트는 기존 Canvas 렌더러를 사용합니다. 작은 전투 요소는 정확한 실루엣, 관절 연결, 히트박스 정렬과 프레임 일관성이 이미지 디테일보다 중요하기 때문입니다.
 
-`localStorage.neonArtMode`를 `legacy`로 지정해도 기존 렌더러를 강제로 사용할 수
-있습니다. URL의 `art=legacy`가 가장 높은 우선순위를 가집니다.
+## 렌더링 원칙
 
-## 에셋 파이프라인
+- 배경 이미지는 충돌 판정에 관여하지 않습니다.
+- 지형 이미지는 서버가 제공하는 실제 충돌 좌표에 맞춰 늘려 그립니다.
+- 이미지가 아직 로드되지 않았거나 로드에 실패하면 기존 Canvas 배경과 지형으로 즉시 대체됩니다.
+- `?art=legacy`를 주소 뒤에 붙이면 모든 스테이지 이미지를 끄고 기존 Canvas 화면을 비교할 수 있습니다.
 
-1. 생성형 이미지 도구로 배경 또는 캐릭터 파츠를 만든다.
-2. 캐릭터 파츠는 크로마키 제거 후 투명 PNG로 변환한다.
-3. `scripts/normalize-prototype-art.py`로 런타임 크기에 맞게 축소한다.
-4. `assets/prototype/manifest.json`에 역할, 앵커, 표시 크기와 폴백을 기록한다.
-5. `art-assets.js`가 비동기로 프리로드하고 기존 Canvas 그리기 직전에 합성한다.
+## 파일 구조
 
-이 구조에서는 AI 이미지가 게임 규칙이나 판정을 소유하지 않습니다. 이미지가
-느리게 로드되거나 실패해도 플레이는 기존 렌더러로 계속됩니다.
+```text
+assets/prototype/
+├─ neon-deck/
+│  ├─ background.png
+│  └─ terrain/
+├─ sky-rail/
+│  ├─ background.png
+│  └─ terrain/
+└─ reactor-core/
+   ├─ background.png
+   └─ terrain/
+```
+
+에셋 목록과 용도는 `assets/prototype/manifest.json`에 기록합니다. `art-assets.js`는 배경과 지형만 로드하며 전투 에셋 API는 의도적으로 비활성화되어 있습니다.
