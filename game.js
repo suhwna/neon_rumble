@@ -2119,7 +2119,8 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
     return applyPoseDelta(styled, authored.active, clamp(contact, .42, 1) * .56);
   }
   if (phase === 'recovery') {
-    return applyPoseDelta(styled, authored.recovery, (1 - t) * .5);
+    const followThrough = Math.cos(t * Math.PI * .5);
+    return applyPoseDelta(styled, authored.recovery, followThrough * .58);
   }
   return styled;
 }
@@ -2820,7 +2821,10 @@ function drawPlayer(p, dt) {
   if (keyPose) {
     const style = window.NEON_MOTION?.styleFor(fighter.id) || { entryMs: 48, phaseMs: 26, activeMs: 18 };
     const changingAction = p.poseTransitionKey?.split(':', 1)[0] !== p.previousPoseAction;
-    const duration = phase === 'active' ? style.activeMs : changingAction ? style.entryMs : style.phaseMs;
+    const transitionKind = phase === 'active' ? 'active' : changingAction ? 'entry' : 'phase';
+    const phaseFrames = Math.max(1, actionPhaseFrames(p, phase, action) || 1);
+    const duration = window.NEON_MOTION?.transitionFor?.(fighter.id, transitionKind, phaseFrames)
+      ?? (phase === 'active' ? style.activeMs : changingAction ? style.entryMs : style.phaseMs);
     const linearMix = duration > 0 ? clamp((p.poseTransitionAge || 0) / duration, 0, 1) : 1;
     if (linearMix < 1 && p.poseTransitionFrom) {
       const smoothMix = linearMix * linearMix * (3 - 2 * linearMix);
@@ -3208,16 +3212,12 @@ function drawPlayer(p, dt) {
   ({frontFootX,frontFootY,backFootX,backFootY}=feet);
   let frontKnee=[(p.face*6+frontFootX)*.5+p.face*4,(hipY+frontFootY)*.5];
   let backKnee=[(-p.face*6+backFootX)*.5-p.face*4,(hipY+backFootY)*.5];
-  const authoredJoints = attack ? window.NEON_MOTION?.jointFor(fighter.id, action) : null;
-  const jointWeight = !authoredJoints ? 0
-    : phase === 'active' ? 1
-      : phase === 'startup' || phase === 'charge' ? progress * .48
-        : phase === 'recovery' ? (1-progress) * .52 : 0;
-  if (jointWeight) {
-    frontKnee[0] += p.face * (authoredJoints.frontKneeX || 0) * jointWeight;
-    frontKnee[1] += (authoredJoints.frontKneeY || 0) * jointWeight;
-    backKnee[0] += p.face * (authoredJoints.backKneeX || 0) * jointWeight;
-    backKnee[1] += (authoredJoints.backKneeY || 0) * jointWeight;
+  const authoredJoints = attack ? window.NEON_MOTION?.jointFor(fighter.id, action, phase, progress) : null;
+  if (authoredJoints) {
+    frontKnee[0] += p.face * (authoredJoints.frontKneeX || 0);
+    frontKnee[1] += authoredJoints.frontKneeY || 0;
+    backKnee[0] += p.face * (authoredJoints.backKneeX || 0);
+    backKnee[1] += authoredJoints.backKneeY || 0;
   }
   const crowding = window.NEON_READABILITY?.crowding(p, players) || 0;
   const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding);
@@ -3346,11 +3346,11 @@ function drawPlayer(p, dt) {
   }
   const frontElbow=[(p.face*7+frontX)*.52+p.face*4,(bodyCenterY-7+frontY+bodyCenterY)*.5];
   const backElbow=[(-p.face*6+backX)*.52-p.face*3,(bodyCenterY-4+backY+bodyCenterY)*.5];
-  if (jointWeight) {
-    frontElbow[0] += p.face * (authoredJoints.frontElbowX || 0) * jointWeight;
-    frontElbow[1] += (authoredJoints.frontElbowY || 0) * jointWeight;
-    backElbow[0] += p.face * (authoredJoints.backElbowX || 0) * jointWeight;
-    backElbow[1] += (authoredJoints.backElbowY || 0) * jointWeight;
+  if (authoredJoints) {
+    frontElbow[0] += p.face * (authoredJoints.frontElbowX || 0);
+    frontElbow[1] += authoredJoints.frontElbowY || 0;
+    backElbow[0] += p.face * (authoredJoints.backElbowX || 0);
+    backElbow[1] += authoredJoints.backElbowY || 0;
   }
   drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
   drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);

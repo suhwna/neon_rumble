@@ -16,32 +16,34 @@
     const windup = options.windup
       ? delta(options.windup)
       : {
-          bodyX: -(active.bodyX || 0) * .55,
-          bodyY: Math.abs(active.bodyY || 0) * .25,
-          rotation: -(active.rotation || 0) * .72,
-          frontHandX: -(active.frontHandX || 0) * .46,
-          frontHandY: -(active.frontHandY || 0) * .38,
-          backHandX: -(active.backHandX || 0) * .34,
-          backHandY: -(active.backHandY || 0) * .3,
-          frontFootX: -(active.frontFootX || 0) * .24,
-          backFootX: -(active.backFootX || 0) * .24,
-          scaleX: -(active.scaleX || 0) * .45,
-          scaleY: -(active.scaleY || 0) * .45
+          bodyX: -(active.bodyX || 0) * .42,
+          bodyY: Math.abs(active.bodyY || 0) * .18,
+          rotation: -(active.rotation || 0) * .55,
+          frontHandX: -(active.frontHandX || 0) * .34,
+          frontHandY: -(active.frontHandY || 0) * .28,
+          backHandX: -(active.backHandX || 0) * .26,
+          backHandY: -(active.backHandY || 0) * .22,
+          frontFootX: -(active.frontFootX || 0) * .18,
+          backFootX: -(active.backFootX || 0) * .18,
+          scaleX: -(active.scaleX || 0) * .3,
+          scaleY: -(active.scaleY || 0) * .3
         };
     const recovery = options.recovery
       ? delta(options.recovery)
       : {
-          bodyX: -(active.bodyX || 0) * .22,
-          bodyY: Math.abs(active.bodyY || 0) * .18,
-          rotation: -(active.rotation || 0) * .3,
-          frontHandX: -(active.frontHandX || 0) * .2,
-          frontHandY: -(active.frontHandY || 0) * .18,
-          backHandX: -(active.backHandX || 0) * .16,
-          backHandY: -(active.backHandY || 0) * .16,
-          frontFootX: -(active.frontFootX || 0) * .14,
-          backFootX: -(active.backFootX || 0) * .14,
-          scaleX: -(active.scaleX || 0) * .2,
-          scaleY: -(active.scaleY || 0) * .2
+          // Preserve a small amount of the striking direction as follow-through.
+          // Reversing every joint here made limbs visibly snap behind the body.
+          bodyX: (active.bodyX || 0) * .17,
+          bodyY: (active.bodyY || 0) * .12,
+          rotation: (active.rotation || 0) * .2,
+          frontHandX: (active.frontHandX || 0) * .16,
+          frontHandY: (active.frontHandY || 0) * .14,
+          backHandX: (active.backHandX || 0) * .13,
+          backHandY: (active.backHandY || 0) * .13,
+          frontFootX: (active.frontFootX || 0) * .1,
+          backFootX: (active.backFootX || 0) * .1,
+          scaleX: (active.scaleX || 0) * .12,
+          scaleY: (active.scaleY || 0) * .12
         };
     return Object.freeze({
       windup: Object.freeze(windup),
@@ -153,15 +155,40 @@
     nova: Object.freeze({ entryMs: 66, phaseMs: 31, activeMs: 20 })
   });
 
-  function jointProfile(fighterId, action) {
+  function jointProfile(fighterId, action, phase = 'active', progress = .5) {
     const actionJoints = ACTION_JOINTS[action];
     if (!actionJoints) return null;
     const fighterJoints = FIGHTER_JOINTS[fighterId] || {};
+    const t = Math.max(0, Math.min(1, Number(progress) || 0));
+    const eased = t * t * (3 - 2 * t);
+    const actionWeight = phase === 'startup' || phase === 'charge'
+      ? -.42 * eased
+      : phase === 'recovery'
+        ? .72 * Math.pow(1 - t, .72)
+        : .78 + Math.sin(t * Math.PI) * .22;
+    const fighterWeight = phase === 'startup' || phase === 'charge'
+      ? .42 + eased * .18
+      : phase === 'recovery'
+        ? .7 * (1 - eased)
+        : 1;
     const result = {};
     for (const key of new Set([...Object.keys(actionJoints), ...Object.keys(fighterJoints)])) {
-      result[key] = (actionJoints[key] || 0) + (fighterJoints[key] || 0);
+      result[key] = (actionJoints[key] || 0) * actionWeight
+        + (fighterJoints[key] || 0) * fighterWeight;
     }
     return result;
+  }
+
+  function transitionDuration(fighterId, kind, phaseFrames = 1) {
+    const style = MOTION_STYLES[fighterId] || MOTION_STYLES.volt;
+    const requested = kind === 'active'
+      ? style.activeMs
+      : kind === 'entry'
+        ? style.entryMs
+        : style.phaseMs;
+    const budget = Math.max(1, Number(phaseFrames) || 1) * (1000 / 60);
+    const budgetRatio = kind === 'active' ? .78 : kind === 'entry' ? .68 : .55;
+    return Math.max(12, Math.min(requested, budget * budgetRatio));
   }
 
   const api = Object.freeze({
@@ -172,7 +199,8 @@
     jointFor: jointProfile,
     styleFor(fighterId) {
       return MOTION_STYLES[fighterId] || MOTION_STYLES.volt;
-    }
+    },
+    transitionFor: transitionDuration
   });
 
   root.NEON_MOTION = api;
