@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { layerOrder, cue, crowding } = require('../combat-readability');
+const { layerOrder, cue, crowding, statusCue } = require('../combat-readability');
 
 test('active attacks and hit reactions draw above neutral fighters without slot priority', () => {
   const players = [
@@ -25,4 +25,20 @@ test('crowding only strengthens silhouettes for spatially overlapping fighters',
   assert.equal(crowding(players[3], players), 0);
   players[2].eliminated = true;
   assert.equal(crowding(players[0], players), 1);
+});
+
+test('hit, general invincibility, and ledge protection use distinct stable cues', () => {
+  assert.deepEqual(
+    statusCue({ actionName: 'groundHit', flashUntil: 200, impactVisualUntil: 250, invincible: 30 }, 100),
+    { kind: 'hit', bodyFlash: false, outline: '#fff0df', glow: '#ff5f72' }
+  );
+  assert.deepEqual(
+    statusCue({ actionName: 'idle', invincible: 30 }, 100),
+    { kind: 'invincible', bodyFlash: false, outline: '#ffffff', glow: '#ffffff' }
+  );
+  assert.deepEqual(
+    statusCue({ actionName: 'ledgeCatch', ledge: { x: 0 }, ledgeCatchFrames: 0, ledgeInvincible: 18, invincible: 0 }, 100),
+    { kind: 'ledge', bodyFlash: false, outline: '#d8dde7', glow: '#ffffff' }
+  );
+  assert.equal(statusCue({ actionName: 'idle' }, 100).kind, 'normal');
 });

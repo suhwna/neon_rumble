@@ -59,12 +59,21 @@
     }
 
     channel(input, force = false) {
-      const direction = value => Math.abs(value) < 0.2 ? 0 : Math.sign(value);
+      const axisBand = value => {
+        const magnitude = Math.abs(Number(value) || 0);
+        if (magnitude < 0.2) return 0;
+        if (magnitude < 0.52) return Math.sign(value);
+        if (magnitude < 0.82) return Math.sign(value) * 2;
+        return Math.sign(value) * 3;
+      };
       const reliable = force
         || !this.last
         || input.buttons !== this.last.buttons
-        || direction(input.horizontal) !== direction(this.last.horizontal)
-        || direction(input.vertical) !== direction(this.last.vertical);
+        // Keyboard walk/run and analogue stick strength changes affect the
+        // authoritative movement state. Treat crossing those bands as an
+        // input edge so a dropped volatile packet cannot delay a run or dash.
+        || axisBand(input.horizontal) !== axisBand(this.last.horizontal)
+        || axisBand(input.vertical) !== axisBand(this.last.vertical);
       this.last = { ...input };
       if (this.metrics) {
         const key = reliable ? 'reliableInputs' : 'volatileInputs';

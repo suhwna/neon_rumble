@@ -34,6 +34,17 @@ test('input transport makes state edges reliable and sustained frames volatile',
   assert.equal(policy.channel({ buttons: 0, horizontal: 0, vertical: 0 }), 'volatile');
   assert.equal(policy.channel({ buttons: 1, horizontal: 0, vertical: 0 }), 'reliable');
   assert.equal(policy.channel({ buttons: 1, horizontal: 0.6, vertical: 0 }), 'reliable');
-  assert.equal(policy.channel({ buttons: 1, horizontal: 1, vertical: 0 }), 'volatile');
-  assert.deepEqual(metrics, { reliableInputs: 3, volatileInputs: 2 });
+  assert.equal(policy.channel({ buttons: 1, horizontal: 1, vertical: 0 }), 'reliable');
+  assert.equal(policy.channel({ buttons: 1, horizontal: 0.95, vertical: 0 }), 'volatile');
+  assert.deepEqual(metrics, { reliableInputs: 4, volatileInputs: 2 });
+});
+
+test('input transport preserves precision, walk, and run band transitions', () => {
+  const policy = new InputTransportPolicy();
+  assert.equal(policy.channel({ buttons: 0, horizontal: 0, vertical: 0 }), 'reliable');
+  assert.equal(policy.channel({ buttons: 2, horizontal: 0.44, vertical: 0 }), 'reliable');
+  assert.equal(policy.channel({ buttons: 2, horizontal: 0.62, vertical: 0 }), 'reliable');
+  assert.equal(policy.channel({ buttons: 2, horizontal: 1, vertical: 0 }), 'reliable');
+  assert.equal(policy.channel({ buttons: 2, horizontal: 0.91, vertical: 0 }), 'volatile');
+  assert.equal(policy.channel({ buttons: 2, horizontal: -0.91, vertical: 0 }), 'reliable');
 });

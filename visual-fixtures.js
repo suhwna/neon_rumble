@@ -25,7 +25,7 @@
         grounded: options.grounded ?? true,
         platformId: options.grounded === false ? null : 'main',
         jumps: 2, damage: 35 + index * 17,
-        stocks: 3, score: 0, shield: shieldMax, shielding: false, invincible: 0,
+        stocks: 3, score: 0, shield: shieldMax, shielding: false, invincible: options.invincible || 0,
         eliminated: false, respawn: 0, respawnPlatformFrames: 0,
         actionName: action, actionPhase: options.phase ?? (action === 'groundHit' ? null : 'active'),
         actionVariant: options.variant || null, actionMotion: move.motion || null,
@@ -40,7 +40,10 @@
         stun: action === 'groundHit' ? 12 : 0, hitstop: options.hitstop || 0,
         movementState: 'idle', dashFrames: 0, dashAge: 0, dashDirection: 0,
         dodgeFrames: 0, dodgeTotalFrames: 0, dodgeElapsed: 0,
-        ledge: null, grabbedBy: null, grabbing: null, landingLag: 0,
+        ledge: options.ledge || null,
+        ledgeInvincible: options.ledgeInvincible || 0,
+        ledgeCatchFrames: options.ledgeCatchFrames || 0,
+        grabbedBy: null, grabbing: null, landingLag: 0,
         tumbling: false, freefall: false, knockdownFrames: 0,
         ultimateMeter: 45 + index * 12,
         flashUntil: action === 'groundHit' ? Number.POSITIVE_INFINITY : 0,
@@ -68,6 +71,19 @@
         makePlayer(fighters[1], 1, 615, 'groundHit', { face: -1, impactAngle: 0, impactStrength: 1.3 }),
         makePlayer(fighters[2], 2, 685, 'groundDown', { face: -1, progress: .35 }),
         makePlayer(fighters[3], 3, 755, 'groundHit', { face: 1, impactAngle: Math.PI, impactStrength: .85 })
+      ];
+    } else if (fixture === 'status-cues') {
+      players = [
+        makePlayer(fighters[0], 0, 275, 'groundHit', { face: 1 }),
+        makePlayer(fighters[1], 1, 515, 'idle', { invincible: 70 }),
+        makePlayer(fighters[2], 2, 755, 'ledgeCatch', {
+          face: -1,
+          ledge: { platformId: 'main', x: 780, y: 500, face: -1 },
+          ledgeInvincible: 22,
+          ledgeCatchFrames: 0,
+          invincible: 22
+        }),
+        makePlayer(fighters[3], 3, 995, 'idle')
       ];
     } else {
       players = [

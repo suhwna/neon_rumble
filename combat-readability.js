@@ -43,7 +43,26 @@
     return Math.min(3, nearby);
   }
 
-  const api = Object.freeze({ statePriority, layerOrder, cue, crowding });
+  function statusCue(player, now = 0) {
+    const action = String(player?.actionName || '');
+    const hitReaction = action === 'hit' || action === 'groundHit' || action === 'grabbedHit';
+    const hit = hitReaction
+      && Number(player?.flashUntil || 0) > now
+      && Number(player?.impactVisualUntil || 0) > now;
+    if (hit) return { kind: 'hit', bodyFlash: false, outline: '#fff0df', glow: '#ff5f72' };
+
+    const ledge = !!player?.ledge
+      && Number(player?.ledgeCatchFrames || 0) <= 0
+      && Number(player?.ledgeInvincible || 0) > 0;
+    if (ledge) return { kind: 'ledge', bodyFlash: false, outline: '#d8dde7', glow: '#ffffff' };
+
+    if (Number(player?.invincible || 0) > 0) {
+      return { kind: 'invincible', bodyFlash: false, outline: '#ffffff', glow: '#ffffff' };
+    }
+    return { kind: 'normal', bodyFlash: false, outline: '#080d19', glow: null };
+  }
+
+  const api = Object.freeze({ statePriority, layerOrder, cue, crowding, statusCue });
   root.NEON_READABILITY = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -111,7 +111,7 @@ fetch('/releases.json', { cache: 'no-store' })
 
 const WORLD_W = 1280, WORLD_H = 720, SHIELD_MAX = 50;
 let dpr = 1, viewScale = 1, viewOffsetX = 0, viewOffsetY = 0;
-let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], blastMarks = [], shieldBreakEffects = [], dashAfterimages = [];
+let camera = { x: 640, y: 355, zoom: 1 }, screenShake = 0, cameraPunch = 0, criticalFlash = 0, impactRings = [], finisherImpacts = [], blastMarks = [], shieldBreakEffects = [], dashAfterimages = [];
 let ultimateCinematic = null, koCinematics = [];
 let state = 'menu', room = null, myIndex = -1, identity = null;
 let selectedCharacter = localStorage.getItem('neon_character') || 'volt';
@@ -451,7 +451,7 @@ function restoreMainUi() {
 function beginWarmup(snapshot) {
   if (!snapshot) return;
   state = 'waiting';
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; finisherImpacts = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
@@ -461,7 +461,7 @@ async function leaveRoomToMenu() {
   await emitAck('room:leave');
   state = 'menu'; room = null; myIndex = -1;
   players = []; snapshots = []; latestSnapshot = null; localCue = null; ultimateCinematic = null;
-  particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = [];
+  particles = []; trails = []; impactRings = []; finisherImpacts = []; blastMarks = []; shieldBreakEffects = [];
   paused = false; hitboxes = false;
   closeTutorial(); setTrainingGuideOpen(false); resetTrainingInputHistory();
   trainingPanel.querySelectorAll('[data-training]').forEach(tool => {
@@ -749,7 +749,7 @@ function beginMatch(snapshot) {
     closeTutorial();
     setTrainingGuideOpen(false);
   }
-  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
+  snapshots = []; latestSnapshot = null; players = []; particles = []; trails = []; impactRings = []; finisherImpacts = []; blastMarks = []; shieldBreakEffects = []; localCue = null; ultimateCinematic = null; lastEvents.clear();
   receiveSnapshot(snapshot);
 }
 
@@ -803,7 +803,7 @@ function processEvents(events) {
       const player = players.find(item => item.i === (pummel ? event.target : event.player));
       const attacker = players.find(item => item.i === (pummel ? event.player : event.attacker));
       const hitX = event.x ?? player?.x, hitY = event.y ?? player?.y;
-      const sweet = event.quality === 'sweet', critical = event.type === 'hit' && event.critical, ultimate = !!event.ultimate;
+      const sweet = event.quality === 'sweet', critical = event.type === 'hit' && event.critical, finisher = event.type === 'hit' && event.finisherFlight, ultimate = !!event.ultimate;
       const impactColor = event.type === 'parry' ? '#fff36b' : event.type === 'shield-hit' ? '#79efff' : event.color || '#ffffff';
       const impactStrength = pummel ? .42 : clamp((event.launchSpeed || (event.power || 4) * 55) / 500, .4, 1.55);
       const impactAngle = Number.isFinite(event.launchAngle)
@@ -828,6 +828,14 @@ function processEvents(events) {
           });
           if (impactRings.length > 10) impactRings.splice(0, impactRings.length - 10);
         }
+        if (finisher) {
+          const duration = .34;
+          finisherImpacts.push({
+            x: hitX, y: hitY, angle: impactAngle, color: impactColor,
+            strength: impactStrength, life: duration, duration
+          });
+          if (finisherImpacts.length > 3) finisherImpacts.shift();
+        }
       }
       if (player) {
         const visualDuration = event.type === 'parry' ? 190 : critical || ultimate ? 170 : sweet ? 125 : pummel ? 70 : 92;
@@ -836,9 +844,9 @@ function processEvents(events) {
         player.impactVisualStrength = impactStrength;
         player.impactVisualAngle = impactAngle;
       }
-      screenShake = Math.max(screenShake, ultimate ? 22 : event.type === 'parry' ? 12 : critical ? 17 : 3 + impactStrength * 4.5 + (sweet ? 2 : 0));
-      cameraPunch = Math.max(cameraPunch, ultimate ? .145 : event.type === 'parry' ? .075 : critical ? .12 : Math.min(.078, .012 + impactStrength * .045));
-      if (critical || ultimate) criticalFlash = 1;
+      screenShake = Math.max(screenShake, ultimate ? 22 : finisher ? 20 : event.type === 'parry' ? 12 : critical ? 17 : 3 + impactStrength * 4.5 + (sweet ? 2 : 0));
+      cameraPunch = Math.max(cameraPunch, ultimate ? .145 : finisher ? .155 : event.type === 'parry' ? .075 : critical ? .12 : Math.min(.078, .012 + impactStrength * .045));
+      if (critical || finisher || ultimate) criticalFlash = 1;
       if (event.type === 'parry') beep(620, .075, 'square');
       else impactSound(impactStrength, { critical: critical || ultimate, sweet, pummel, shield: event.type === 'shield-hit' });
     }
@@ -958,7 +966,7 @@ function processEvents(events) {
 }
 
 function copyState(target, source) {
-  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','shieldOffsetX','shieldOffsetY','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeSerial','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeGrabs','ledgeTransition','ledgeTransitionFrames','ledgeTransitionTotal','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionAngleShift','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','ultimateMeter','stun','dizzyFrames','footstoolCooldown','fastFalling','fastFallFlashFrames','horizontalHoldFrames','landingLag','tumbling','tumbleRecoverFrames','freefall','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','movementState','dashFrames','dashAge','dashDirection','dashBrakeFrames','jumpSquatDash','jumpSquatFrames','eliminated','respawn','respawnPlatformFrames','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
+  for (const key of ['clientId','nickname','vx','vy','face','grounded','jumps','doubleJumpSerial','damage','stocks','score','shield','shielding','parryFrames','shieldStun','shieldDropLag','shieldOffsetX','shieldOffsetY','invincible','dodgeFrames','dodgeTotalFrames','dodgeElapsed','dodgeSerial','dodgeStartVx','dodgeStartVy','dodgeInitialVx','dodgeInitialVy','dodgeWindupFrames','dodgeNeutral','airDodgeAvailable','recoveryAvailable','ledge','ledgeInvincible','ledgeCatchFrames','ledgeGrabLockFrames','ledgeHangFrames','ledgeGrabs','ledgeTransition','ledgeTransitionFrames','ledgeTransitionTotal','grabbedBy','grabbing','grabFrames','grabEscape','grabPummelCooldown','comboCount','jabStep','jabTimer','actionName','actionFrame','actionPhase','actionVariant','actionMotion','actionAngleShift','actionTiming','phaseProgress','actionHitbox','strikePoints','hurtboxes','chargeFrames','chargeScale','projectileCooldown','projectileCooldownMax','ultimateMeter','stun','dizzyFrames','footstoolCooldown','fastFalling','fastFallFlashFrames','horizontalHoldFrames','landingLag','tumbling','tumbleRecoverFrames','freefall','techWindow','knockdownFrames','criticalFlightFrames','dodgeFatigue','movementState','dashFrames','dashAge','dashDirection','dashBrakeFrames','jumpSquatDash','jumpSquatFrames','eliminated','respawn','respawnPlatformFrames','ackSeq','heldItem','team','characterId','palette','width','height']) target[key] = source[key];
 }
 function lerp(a, b, amount) { return a + (b - a) * amount; }
 function actionPhaseFrames(player, phase = player.actionPhase, actionName = player.actionName) {
@@ -1014,7 +1022,10 @@ function renderNetworkState(dt, now) {
       const groundPredictionSpeed = dashState
         ? (localSource.movementState === 'pivot' ? fighter.pivotDashSpeed : fighter.dashSpeed)
         : localSource.movementState === 'run' ? fighter.runSpeed : fighter.walkSpeed;
-      const targetVx = locked ? localSource.vx : local.horizontal * (localSource.grounded ? groundPredictionSpeed * fighter.speed : 345 * fighter.air);
+      // walk/run/dash speeds are already final per-fighter world speeds.
+      // Multiplying by fighter.speed again made prediction overshoot or
+      // undershoot the server, causing a small correction hitch every snapshot.
+      const targetVx = locked ? localSource.vx : local.horizontal * (localSource.grounded ? groundPredictionSpeed : 345 * fighter.air);
       const predictedVx = lerp(localSource.vx, targetVx, clamp(predictionLead * (localSource.grounded ? 25 : 14), 0, 1));
       const predictedX = localSource.x + (localSource.vx + predictedVx) * .5 * predictionLead;
       const predictedY = localSource.y + (localSource.grounded ? 0 : localSource.vy * predictionLead + 720 * predictionLead * predictionLead);
@@ -1030,8 +1041,12 @@ function renderNetworkState(dt, now) {
         const correctionError = Math.hypot(predictedX - display.x, predictedY - display.y);
         const correction = networkQuality.correction(correctionError, now, runtimeMetrics.inputAckMs);
         if (correction > 0) {
-          display.x = lerp(display.x, predictedX, correction);
-          display.y = lerp(display.y, predictedY, correction);
+          // NetworkQualityTracker returns a 60 Hz tuning value. Normalize it
+          // to elapsed render time so 120/144 Hz displays do not repay errors
+          // more aggressively (and visibly) than a 60 Hz display.
+          const frameCorrection = 1 - Math.pow(1 - correction, clamp(dt * 60, .25, 2));
+          display.x = lerp(display.x, predictedX, frameCorrection);
+          display.y = lerp(display.y, predictedY, frameCorrection);
         }
       }
       copyState(display, localSource);
@@ -1150,6 +1165,7 @@ function draw(dt) {
   drawShieldBreakEffects();
   drawParticles();
   drawImpactRings();
+  drawFinisherImpacts();
   ctx.setTransform(dpr*viewScale,0,0,dpr*viewScale,viewOffsetX*dpr,viewOffsetY*dpr);
   drawCameraIndicators();
   drawKoCinematics();
@@ -1525,9 +1541,9 @@ function blendKeyPose(from, to, amount) {
 
 const LOOP_KEYFRAMES = Object.freeze({
   idle: [
-    { t: 0, bodyX: 0, bodyY: 1, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 },
-    { t: .5, bodyX: -1, bodyY: -1, rotation: .006, frontHandX: 23, frontHandY: -9, backHandX: -18, backHandY: 0, frontFootX: 14, backFootX: -16 },
-    { t: 1, bodyX: 0, bodyY: 1, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }
+    { t: 0, bodyX: 0, bodyY: 2, rotation: .012, scaleX: 1.02, scaleY: .98, frontHandX: 31, frontHandY: -6, backHandX: -20, backHandY: 2, frontFootX: 25, backFootX: -25 },
+    { t: .5, bodyX: 0, bodyY: 0, rotation: .006, scaleX: 1, scaleY: 1, frontHandX: 30, frontHandY: -8, backHandX: -19, backHandY: 0, frontFootX: 24, backFootX: -24 },
+    { t: 1, bodyX: 0, bodyY: 2, rotation: .012, scaleX: 1.02, scaleY: .98, frontHandX: 31, frontHandY: -6, backHandX: -20, backHandY: 2, frontFootX: 25, backFootX: -25 }
   ],
   walk: [
     { t: 0, bodyX: 1, bodyY: 0, rotation: .035, frontHandX: -17, frontHandY: -2, backHandX: 16, backHandY: -9, frontFootX: 21, frontFootLift: 0, backFootX: -18, backFootLift: 0 },
@@ -1724,6 +1740,23 @@ const ATTACK_KEYFRAMES = Object.freeze({
     active: [{ t: 0, bodyX: -2, bodyY: 8, rotation: .03, frontHandX: -5, frontHandY: 12, backHandX: -15, backHandY: 7 }, { t: .3, bodyX: 3, bodyY: -13, rotation: -.07, scaleX: .84, scaleY: 1.25, frontHandX: 12, frontHandY: -59, backHandX: -14, backHandY: -34, frontFootX: 16, backFootX: -16 }, { t: 1, bodyX: 2, bodyY: -8, rotation: -.04, scaleX: .9, scaleY: 1.16, frontHandX: 13, frontHandY: -50, backHandX: -16, backHandY: -28 }],
     recovery: [{ t: 0, bodyX: 2, bodyY: -8, rotation: -.04, frontHandX: 13, frontHandY: -50, backHandX: -16, backHandY: -28 }, { t: 1, bodyX: 0, bodyY: 0, rotation: .018, frontHandX: 24, frontHandY: -7, backHandX: -17, backHandY: 1, frontFootX: 15, backFootX: -15 }]
   },
+  airUp: {
+    startup: [
+      { t: 0 },
+      { t: 1, bodyY: 3, rotation: .035, scaleX: 1.06, scaleY: .94, frontHandX: -2, frontHandY: 3, backHandX: -17, backHandY: -2, frontFootX: 9, frontFootLift: 14, backFootX: -9, backFootLift: 16 }
+    ],
+    active: [
+      { t: 0, bodyY: 3, rotation: .035, scaleX: 1.06, scaleY: .94, frontHandX: -2, frontHandY: 3, backHandX: -17, backHandY: -2, frontFootX: 9, frontFootLift: 14, backFootX: -9, backFootLift: 16 },
+      { t: .24, bodyX: 2, bodyY: -6, rotation: -.055, scaleX: .94, scaleY: 1.11, frontHandX: 9, frontHandY: -58, backHandX: -15, backHandY: -23, frontFootX: 8, frontFootLift: 19, backFootX: -10, backFootLift: 15 },
+      { t: .68, bodyX: 2, bodyY: -5, rotation: -.045, scaleX: .96, scaleY: 1.08, frontHandX: 10, frontHandY: -54, backHandX: -16, backHandY: -20, frontFootX: 8, frontFootLift: 18, backFootX: -10, backFootLift: 14 },
+      { t: 1, bodyX: 1, bodyY: -3, rotation: -.025, scaleX: .98, scaleY: 1.04, frontHandX: 12, frontHandY: -45, backHandX: -18, backHandY: -15, frontFootX: 9, frontFootLift: 16, backFootX: -10, backFootLift: 13 }
+    ],
+    recovery: [
+      { t: 0, bodyX: 1, bodyY: -3, rotation: -.025, scaleX: .98, scaleY: 1.04, frontHandX: 12, frontHandY: -45, backHandX: -18, backHandY: -15, frontFootX: 9, frontFootLift: 16, backFootX: -10, backFootLift: 13 },
+      { t: .55, bodyY: -1, rotation: 0, frontHandX: 18, frontHandY: -20, backHandX: -20, backHandY: -8, frontFootX: 10, frontFootLift: 13, backFootX: -10, backFootLift: 13 },
+      { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    ]
+  },
   down: {
     startup: [{ t: 0 }, { t: 1, bodyX: -2, bodyY: 9, rotation: .05, scaleX: 1.22, scaleY: .76, frontHandX: 16, frontHandY: 6, backHandX: -21, backHandY: 5, frontFootX: 19, backFootX: -21 }],
     active: [{ t: 0, bodyX: -2, bodyY: 9, rotation: .05, frontHandX: 16, frontHandY: 6, backHandX: -21, backHandY: 5 }, { t: .32, bodyX: 4, bodyY: 10, rotation: -.09, scaleX: 1.26, scaleY: .72, frontHandX: -6, frontHandY: 11, backHandX: -27, backHandY: 14, frontFootX: 59, frontFootLift: 4, backFootX: -20 }, { t: 1, bodyX: 2, bodyY: 8, rotation: -.05, frontHandX: 3, frontHandY: 8, backHandX: -23, backHandY: 11, frontFootX: 48, frontFootLift: 3, backFootX: -19 }],
@@ -1746,9 +1779,21 @@ const ATTACK_KEYFRAMES = Object.freeze({
     ]
   },
   airForward: {
-    startup: [{ t: 0 }, { t: 1, bodyX: -2, rotation: .13, frontHandX: -22, frontHandY: -9, backHandX: -28, backHandY: 6, frontFootX: 10, frontFootLift: 11, backFootX: -18, backFootLift: 8 }],
-    active: [{ t: 0, bodyX: -2, rotation: .13, frontHandX: -22, frontHandY: -9, backHandX: -28, backHandY: 6 }, { t: .3, bodyX: 5, rotation: -.25, frontHandX: -27, frontHandY: -5, backHandX: -31, backHandY: 8, frontFootX: 68, frontFootLift: 21, backFootX: -20, backFootLift: 8 }, { t: 1, bodyX: 3, rotation: -.16, frontHandX: -24, frontHandY: -4, backHandX: -28, backHandY: 7, frontFootX: 57, frontFootLift: 18 }],
-    recovery: [{ t: 0, bodyX: 3, rotation: -.16, frontHandX: -24, frontHandY: -4, backHandX: -28, backHandY: 7, frontFootX: 57, frontFootLift: 18 }, { t: 1, bodyX: 0, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [
+      { t: 0 },
+      { t: 1, bodyX: -4, bodyY: -1, rotation: .08, scaleX: .96, scaleY: 1.03, frontHandX: 4, frontHandY: -7, backHandX: -28, backHandY: 1, frontFootX: 7, frontFootLift: 17, backFootX: -17, backFootLift: 10 }
+    ],
+    active: [
+      { t: 0, bodyX: -4, bodyY: -1, rotation: .08, scaleX: .96, scaleY: 1.03, frontHandX: 4, frontHandY: -7, backHandX: -28, backHandY: 1, frontFootX: 7, frontFootLift: 17, backFootX: -17, backFootLift: 10 },
+      { t: .24, bodyX: 6, bodyY: -1, rotation: .04, scaleX: 1.02, scaleY: .99, frontHandX: 43, frontHandY: -8, backHandX: -31, backHandY: -3, frontFootX: 72, frontFootLift: 29, backFootX: -24, backFootLift: -16 },
+      { t: .68, bodyX: 5, bodyY: 0, rotation: .02, scaleX: 1.03, scaleY: .98, frontHandX: 39, frontHandY: -7, backHandX: -29, backHandY: -2, frontFootX: 67, frontFootLift: 25, backFootX: -22, backFootLift: -13 },
+      { t: 1, bodyX: 3, bodyY: 0, rotation: -.01, scaleX: 1.01, scaleY: .99, frontHandX: 34, frontHandY: -7, backHandX: -26, backHandY: -1, frontFootX: 57, frontFootLift: 19, backFootX: -19, backFootLift: -6 }
+    ],
+    recovery: [
+      { t: 0, bodyX: 3, bodyY: 0, rotation: -.01, scaleX: 1.01, scaleY: .99, frontHandX: 34, frontHandY: -7, backHandX: -26, backHandY: -1, frontFootX: 57, frontFootLift: 19, backFootX: -19, backFootLift: -6 },
+      { t: .55, bodyX: 1, bodyY: -1, rotation: .01, frontHandX: 29, frontHandY: -7, backHandX: -24, backHandY: -2, frontFootX: 28, frontFootLift: 13, backFootX: -15, backFootLift: 6 },
+      { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    ]
   },
   airBack: {
     startup: [{ t: 0 }, { t: 1, bodyX: 2, rotation: -.15, frontHandX: 24, frontHandY: -7, backHandX: 31, backHandY: 7, frontFootX: 18, frontFootLift: 8, backFootX: -10, backFootLift: 12 }],
@@ -1756,14 +1801,37 @@ const ATTACK_KEYFRAMES = Object.freeze({
     recovery: [{ t: 0, bodyX: -3, rotation: .17, frontHandX: 27, frontHandY: -4, backHandX: 30, backHandY: 8, backFootX: -58, backFootLift: 19 }, { t: 1, bodyX: 0, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
   },
   airNeutral: {
-    startup: [{ t: 0 }, { t: 1, bodyY: -4, rotation: .09, scaleX: .88, scaleY: 1.08, frontHandX: 11, frontHandY: -17, backHandX: -20, backHandY: 1, frontFootX: 7, frontFootLift: 17, backFootX: -13, backFootLift: 20 }],
-    active: [{ t: 0, bodyY: -4, rotation: .09, scaleX: .88, scaleY: 1.08 }, { t: .35, bodyY: 1, rotation: -.12, scaleX: 1.08, scaleY: .9, frontHandX: 36, frontHandY: -15, backHandX: -22, backHandY: 8, frontFootX: 48, frontFootLift: 5, backFootX: -22, backFootLift: 18 }, { t: 1, bodyY: 0, rotation: -.07, scaleX: 1.04, scaleY: .94, frontHandX: 31, frontHandY: -12, backHandX: -20, backHandY: 5, frontFootX: 40, frontFootLift: 7, backFootX: -18, backFootLift: 16 }],
-    recovery: [{ t: 0, bodyY: 0, rotation: -.07, scaleX: 1.04, scaleY: .94, frontHandX: 31, frontHandY: -12, backHandX: -20, backHandY: 5, frontFootX: 40, frontFootLift: 7, backFootX: -18, backFootLift: 16 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [
+      { t: 0 },
+      { t: 1, bodyX: -4, bodyY: -3, rotation: .17, scaleX: .9, scaleY: 1.08, frontHandX: 5, frontHandY: -20, backHandX: -25, backHandY: -4, frontFootX: 2, frontFootLift: 17, backFootX: -18, backFootLift: 20 }
+    ],
+    active: [
+      { t: 0, bodyX: -4, bodyY: -3, rotation: .17, scaleX: .9, scaleY: 1.08, frontHandX: 5, frontHandY: -20, backHandX: -25, backHandY: -4, frontFootX: 2, frontFootLift: 17, backFootX: -18, backFootLift: 20 },
+      { t: .24, bodyX: 8, bodyY: -1, rotation: -.5, scaleX: 1.04, scaleY: .98, frontHandX: 52, frontHandY: -31, backHandX: -32, backHandY: -20, frontFootX: -25, frontFootLift: -17, backFootX: -43, backFootLift: 2 },
+      { t: .62, bodyX: 7, bodyY: 0, rotation: -.43, scaleX: 1.05, scaleY: .97, frontHandX: 47, frontHandY: -27, backHandX: -29, backHandY: -17, frontFootX: -20, frontFootLift: -13, backFootX: -38, backFootLift: 4 },
+      { t: 1, bodyX: 4, bodyY: 0, rotation: -.29, scaleX: 1.03, scaleY: .98, frontHandX: 39, frontHandY: -21, backHandX: -25, backHandY: -11, frontFootX: -10, frontFootLift: -4, backFootX: -30, backFootLift: 8 }
+    ],
+    recovery: [
+      { t: 0, bodyX: 4, bodyY: 0, rotation: -.29, scaleX: 1.03, scaleY: .98, frontHandX: 39, frontHandY: -21, backHandX: -25, backHandY: -11, frontFootX: -10, frontFootLift: -4, backFootX: -30, backFootLift: 8 },
+      { t: .55, bodyX: 1, bodyY: -1, rotation: -.1, scaleX: 1.01, scaleY: .99, frontHandX: 30, frontHandY: -12, backHandX: -23, backHandY: -5, frontFootX: 4, frontFootLift: 5, backFootX: -19, backFootLift: 11 },
+      { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    ]
   },
   airDown: {
-    startup: [{ t: 0 }, { t: 1, bodyY: -6, rotation: -.12, scaleX: .91, scaleY: 1.08, frontHandX: 21, frontHandY: -25, backHandX: -20, backHandY: -18, frontFootX: 5, frontFootLift: 17, backFootX: -15, backFootLift: 9 }],
-    active: [{ t: 0, bodyY: -6, rotation: -.12, frontHandX: 21, frontHandY: -25, backHandX: -20, backHandY: -18 }, { t: .3, bodyY: 4, rotation: .08, scaleX: .94, scaleY: 1.22, frontHandX: 17, frontHandY: -23, backHandX: -22, backHandY: -16, frontFootX: 5, frontFootLift: -31, backFootX: -15, backFootLift: -9 }, { t: 1, bodyY: 3, rotation: .055, scaleX: .96, scaleY: 1.14, frontHandX: 19, frontHandY: -19, backHandX: -21, backHandY: -13, frontFootX: 6, frontFootLift: -25, backFootX: -14, backFootLift: -7 }],
-    recovery: [{ t: 0, bodyY: 3, rotation: .055, scaleX: .96, scaleY: 1.14, frontHandX: 19, frontHandY: -19, backHandX: -21, backHandY: -13, frontFootX: 6, frontFootLift: -25, backFootX: -14, backFootLift: -7 }, { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }]
+    startup: [
+      { t: 0 },
+      { t: 1, bodyY: -3, rotation: -.02, scaleX: 1, scaleY: 1, frontHandX: 27, frontHandY: -10, backHandX: -27, backHandY: -9, frontFootX: 8, frontFootLift: 18, backFootX: -22, backFootLift: 16 }
+    ],
+    active: [
+      { t: 0, bodyY: -3, rotation: -.02, frontHandX: 27, frontHandY: -10, backHandX: -27, backHandY: -9, frontFootX: 8, frontFootLift: 18, backFootX: -22, backFootLift: 16 },
+      { t: .28, bodyY: 1, rotation: 0, scaleX: 1, scaleY: 1.01, frontHandX: 23, frontHandY: -7, backHandX: -23, backHandY: -7, frontFootX: 4, frontFootLift: -66, backFootX: -12, backFootLift: 14 },
+      { t: 1, bodyY: 1, rotation: 0, scaleX: 1, scaleY: 1, frontHandX: 22, frontHandY: -6, backHandX: -22, backHandY: -6, frontFootX: 4, frontFootLift: -58, backFootX: -11, backFootLift: 12 }
+    ],
+    recovery: [
+      { t: 0, bodyY: 1, rotation: 0, frontHandX: 22, frontHandY: -6, backHandX: -22, backHandY: -6, frontFootX: 4, frontFootLift: -58, backFootX: -11, backFootLift: 12 },
+      { t: .55, bodyY: 0, rotation: .01, frontHandX: 24, frontHandY: -7, backHandX: -24, backHandY: -5, frontFootX: 8, frontFootLift: 9, backFootX: -16, backFootLift: 12 },
+      { t: 1, bodyY: -1, rotation: .01, frontHandX: 25, frontHandY: -7, backHandX: -22, backHandY: -3, frontFootX: 13, frontFootLift: 8, backFootX: -11, backFootLift: 11 }
+    ]
   },
   cast: {
     startup: [{ t: 0 }, { t: 1, bodyX: -11, bodyY: 3, rotation: .18, scaleX: 1.14, scaleY: .88, frontHandX: -10, frontHandY: -13, backHandX: -21, backHandY: 9, frontFootX: 20, backFootX: -23 }],
@@ -1903,6 +1971,10 @@ function fighterStatePose(player, pose, action, progress, age) {
   const t = clamp(progress, 0, 1);
   const stride = Math.sin(t * Math.PI * 2);
   let styled = { ...pose };
+  // The neutral combat stance is intentionally shared by the full roster.
+  // Character identity remains in proportions, head shape and colour rather
+  // than changing the readable ready pose.
+  if (action === 'idle') return styled;
   if (player.characterId === 'volt') {
     const forward = action === 'walk' ? 1.4 : action === 'run' || action === 'dash' ? 3.5 : 0;
     styled = applyPoseDelta(styled, {
@@ -2048,17 +2120,18 @@ function fighterAttackPose(player, pose, action, motion, phase, progress) {
       styled.backFootLift += 5 * Math.max(0, -twist);
     }
     if (action === 'airNeutral') {
-      // BOLT curls into a compact wheel. The body rotation and tucked knees
-      // distinguish it from the long-limbed kicks without adding effects.
-      styled.frontHandX -= 17 * active;
-      styled.backHandX += 15 * active;
-      styled.frontFootX -= 26 * active;
-      styled.backFootX += 17 * active;
-      styled.frontFootLift += 17 * active;
-      styled.backFootLift += 18 * active;
-      styled.rotation += .34 * active;
-      styled.scaleX *= 1 - .12 * active;
-      styled.scaleY *= 1 + .08 * active;
+      // Keep the common diagonal aerial silhouette readable. BOLT adds a
+      // springier twist, but no longer curls so tightly that the attack looks
+      // unrelated to its actual body-sized hitbox.
+      styled.frontHandX += 5 * active;
+      styled.backHandX -= 5 * active;
+      styled.frontFootX -= 5 * active;
+      styled.backFootX -= 4 * active;
+      styled.frontFootLift += 4 * active;
+      styled.backFootLift += 6 * active;
+      styled.rotation += .11 * active;
+      styled.scaleX *= 1 - .03 * active;
+      styled.scaleY *= 1 + .03 * active;
     } else if (action === 'groundDown' || action === 'specialDown') {
       styled.bodyY += 5 * active; styled.frontFootX += 7 * active; styled.backFootX -= 7 * active;
     } else if (action === 'specialUp') {
@@ -2140,7 +2213,8 @@ function attackKeyframeProfile(action, motion, variant) {
   if (action === 'groundJab2') return 'jab2';
   if (action === 'groundJab3') return 'finisher';
   if (action === 'groundSide' || action === 'dashAttack') return 'side';
-  if (action === 'groundUp' || action === 'airUp') return 'up';
+  if (action === 'groundUp') return 'up';
+  if (action === 'airUp') return 'airUp';
   if (action === 'groundDown') return 'down';
   if (action === 'airForward') return 'airForward';
   if (action === 'airBack') return 'airBack';
@@ -2744,12 +2818,14 @@ function drawPlayer(p, dt) {
   if (p.eliminated || p.respawn > 0) return;
   const fighter = FIGHTERS.find(item => item.id === p.characterId) || FIGHTERS[0];
   const color = fighter.palettes[p.palette % fighter.palettes.length];
-  const hitFlash = p.flashUntil > performance.now();
-  const impactCue = p.impactVisualUntil > performance.now();
-  const ledgeInvincible = !!p.ledge && p.invincible > 0;
-  const invincibleFlash = p.invincible > 0 && Math.floor(p.invincible / 3) % 2;
-  const ledgeInvincibleOutline = ledgeInvincible && invincibleFlash;
-  const fullBodyFlash = invincibleFlash && !ledgeInvincible;
+  const visualNow = performance.now();
+  const hitFlash = p.flashUntil > visualNow;
+  const impactCue = p.impactVisualUntil > visualNow;
+  const statusVisual = window.NEON_READABILITY?.statusCue(p, visualNow)
+    || { kind: 'normal', bodyFlash: false, outline: '#080d19', glow: null };
+  const ledgeInvincible = statusVisual.kind === 'ledge';
+  const protectedState = statusVisual.kind === 'invincible' || ledgeInvincible;
+  const fullBodyFlash = statusVisual.bodyFlash;
   const renderColor = fullBodyFlash ? '#ffffff' : color;
   const action = displayedAction(p);
   if (p.keyframeAction !== action) {
@@ -2955,7 +3031,7 @@ function drawPlayer(p, dt) {
     rotation = p.face * airKick;
     scaleX = 1.04; scaleY = .96; bodyY -= 2 * Math.max(0, strike);
   }
-  if (action === 'airForward') rotation += p.face * -.2 * Math.max(0, strike);
+  if (action === 'airForward') rotation += p.face * -.08 * Math.max(0, strike);
   if (action === 'airBack') rotation += p.face * .24 * Math.max(0, strike);
   if (action === 'airUp') rotation += p.face * .12 * Math.max(0, strike);
   if (action === 'airDown') { rotation *= .35; scaleX += .08 * Math.max(0, strike); scaleY += .12 * Math.max(0, strike); }
@@ -3084,13 +3160,14 @@ function drawPlayer(p, dt) {
     ctx.save();ctx.globalAlpha=(1-recoverAge)*.72;ctx.strokeStyle='#b9fbff';ctx.lineWidth=3;ctx.shadowBlur=12;ctx.shadowColor='#65ecff';
     ctx.beginPath();ctx.arc(0,0,p.width*.55+recoverAge*16,-Math.PI*.85,Math.PI*.7);ctx.stroke();ctx.restore();
   }
-  // Ledge invincibility lasts long enough that the ordinary 42%-alpha blink
-  // made the fighter look absent. Keep the body readable and pulse only its
-  // outline; dodge/respawn invincibility retains the stronger shared flash.
-  ctx.globalAlpha = ledgeInvincible ? .9 : invincibleFlash ? .42 : 1;
-  if (p.invincible > 0) {
-    ctx.shadowBlur = 13;
-    ctx.shadowColor = '#ffffff';
+  // State readability uses one consistent grammar: the body never disappears.
+  // Hits flash once; invincibility is a steady cyan outline; ledge protection
+  // uses the same outline at lower intensity.
+  ctx.globalAlpha = 1;
+  if (protectedState) {
+    const pulse = .82 + Math.sin(visualNow / (ledgeInvincible ? 170 : 130)) * .18;
+    ctx.shadowBlur = (ledgeInvincible ? 5 : 8) * pulse;
+    ctx.shadowColor = statusVisual.glow;
   }
   if (p.shielding) {
     ctx.save();ctx.translate(p.shieldOffsetX||0,p.shieldOffsetY||0);
@@ -3164,10 +3241,10 @@ function drawPlayer(p, dt) {
     backFootX = -p.face * (19 + motion.windup * 4);
   }
   if (action === 'groundDown') { frontFootX = p.face * (20 + Math.max(0, strike) * 37); frontFootY = hipY + 11; backFootX = -p.face * 15; backFootY = p.height / 2; }
-  if (action === 'airForward') { frontFootX = p.face * (22 + Math.max(0, strike) * 40); frontFootY = hipY - 2; backFootX = -p.face * 18; backFootY = hipY + 17; }
+  if (action === 'airForward') { frontFootX = p.face * (24 + Math.max(0, strike) * 42); frontFootY = hipY - 9; backFootX = -p.face * 20; backFootY = hipY + 24; }
   if (action === 'airBack') { backFootX = -p.face * (24 + Math.max(0, strike) * 42); backFootY = hipY - 4; frontFootX = p.face * 18; frontFootY = hipY + 18; }
   if (action === 'airNeutral') { frontFootX = p.face * (24 + Math.max(0, strike) * 24); frontFootY = hipY + 19; backFootX = -p.face * (24 + Math.max(0, strike) * 18); backFootY = hipY - 2; }
-  if (action === 'airDown') { frontFootX = p.face * 8; frontFootY = p.height / 2 + Math.max(0, strike) * 30; backFootX = -p.face * 8; backFootY = p.height / 2 + Math.max(0, strike) * 25; }
+  if (action === 'airDown') { frontFootX = p.face * 4; frontFootY = p.height / 2 + Math.max(0, strike) * 36; backFootX = -p.face * 11; backFootY = hipY - 3; }
   if ((action === 'dashAttack' || action === 'specialSide') && phase === 'active') { frontFootX = -p.face * 2; backFootX = -p.face * 27; backFootY = hipY + 12; }
   if (action === 'grabHold') { frontFootX = p.face * 18; backFootX = -p.face * 18; }
   if (action === 'grabbed') { frontFootX = p.face * 7; backFootX = -p.face * 7; frontFootY = backFootY = p.height / 2 + 3; }
@@ -3222,9 +3299,11 @@ function drawPlayer(p, dt) {
     backKnee[1] += authoredJoints.backKneeY || 0;
   }
   const crowding = window.NEON_READABILITY?.crowding(p, players) || 0;
-  const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding);
+  const protectionPulse = protectedState ? .78 + Math.sin(visualNow / (ledgeInvincible ? 170 : 130)) * .22 : 0;
+  const protectionExtra = statusVisual.kind === 'invincible' ? 1.5 * protectionPulse : ledgeInvincible ? .75 * protectionPulse : 0;
+  const silhouetteExtra = 4 + (crowding >= 2 ? 2 : crowding) + protectionExtra;
   const hitAccent = hitFlash && impactCue && (action === 'hit' || action === 'groundHit' || action === 'grabbedHit');
-  const silhouetteOutline = hitAccent || ledgeInvincibleOutline ? '#f7fbff' : '#080d19';
+  const silhouetteOutline = statusVisual.outline;
   drawOutlinedLimb([[-p.face*4,hipY],backKnee,[backFootX,backFootY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
   drawOutlinedLimb([[p.face*4,hipY],frontKnee,[frontFootX,frontFootY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);
   let frontX = p.face * 23, frontY = 3, backX = -p.face * 18, backY = 7;
@@ -3234,9 +3313,10 @@ function drawPlayer(p, dt) {
     else if (action === 'groundSide' || action === 'dashAttack') { frontX = p.face * (10 - windup * 27 + extension * 61); frontY = -7; backX = -p.face * (14 + windup * 12); backY = 10; }
     else if (action === 'grab') { frontX = p.face * (14 + extension * 39); frontY = -9; backX = p.face * (8 + extension * 35); backY = 9; }
     else if (action === 'airNeutral') { frontX = p.face * (20 + extension * 8); frontY = -15; backX = -p.face * (17 + extension * 6); backY = -8; }
-    else if (action === 'airForward') { frontX = -p.face * 21; frontY = -13; backX = -p.face * 27; backY = 7; }
+    else if (action === 'airForward') { frontX = p.face * (24 + extension * 12); frontY = -8; backX = -p.face * 27; backY = -2; }
     else if (action === 'airBack') { frontX = p.face * 23; frontY = -11; backX = p.face * 28; backY = 10; }
-    else if (action === 'airDown') { frontX = p.face * 25; frontY = -15; backX = -p.face * 25; backY = -15; }
+    else if (action === 'airUp') { frontX = p.face * 9; frontY = -p.height / 2 - 24; backX = -p.face * 15; backY = -p.height / 2 + 2; }
+    else if (action === 'airDown') { frontX = p.face * 23; frontY = -7; backX = -p.face * 23; backY = -7; }
     else if (up) { frontX = p.face * 8; frontY = -p.height / 2 - 22; backX = -p.face * 7; backY = -p.height / 2 - 10; }
     else if (down) { frontX = p.face * 28; frontY = p.height / 2 - 1; backX = -p.face * 24; backY = p.height / 2 - 4; }
     else { frontX = p.face * (20 + (action.startsWith('special') ? 30 : 20) * extension); frontY = -4; backX = p.face * (10 + 12 * extension); backY = 12; }
@@ -3354,12 +3434,18 @@ function drawPlayer(p, dt) {
     backElbow[0] += p.face * (authoredJoints.backElbowX || 0);
     backElbow[1] += authoredJoints.backElbowY || 0;
   }
+  if (action === 'idle') {
+    frontElbow[0] = p.face * 22;
+    frontElbow[1] = bodyCenterY + 1;
+    backElbow[0] = -p.face * 31;
+    backElbow[1] = bodyCenterY + 4;
+  }
   drawOutlinedLimb([[-p.face*4,bodyCenterY-4],backElbow,[backX,backY+bodyCenterY]],renderColor,.58,4,silhouetteExtra,silhouetteOutline);
   drawOutlinedLimb([[p.face*4,bodyCenterY-6],frontElbow,[frontX,frontY+bodyCenterY]],renderColor,1,5,silhouetteExtra,silhouetteOutline);
 
   const bodyColor = renderColor;
   const headY=bodyCenterY-bodyHeight*.33,headRadius=fighter.id==='blaze'?13:12,torsoBottom=bodyCenterY+bodyHeight*.43;
-  ctx.shadowBlur=hitFlash?8:0;ctx.shadowColor=renderColor;ctx.lineCap='round';
+  ctx.shadowBlur=hitAccent?8:protectedState?(ledgeInvincible?4:7):0;ctx.shadowColor=statusVisual.glow||renderColor;ctx.lineCap='round';
   ctx.strokeStyle=silhouetteOutline;ctx.lineWidth=10+(silhouetteExtra-4);ctx.beginPath();ctx.moveTo(0,headY+headRadius*.72);ctx.lineTo(0,torsoBottom);ctx.stroke();
   ctx.strokeStyle=bodyColor;ctx.lineWidth=5;ctx.stroke();ctx.shadowBlur=0;
   ctx.beginPath();
@@ -3550,8 +3636,39 @@ function drawParticles(){window.NEON_RENDER_EFFECTS.particles(ctx,particles);}
 function drawBlastMarks(){window.NEON_RENDER_EFFECTS.blastMarks(ctx,blastMarks);}
 function drawShieldBreakEffects(){window.NEON_RENDER_EFFECTS.shieldBreaks(ctx,shieldBreakEffects,effectQuality);}
 function drawImpactRings(){window.NEON_RENDER_EFFECTS.impactRings(ctx,impactRings,effectQuality);}
+function drawFinisherImpacts(){
+  for(const effect of finisherImpacts){
+    const progress=1-effect.life/effect.duration;
+    const alpha=Math.sin(Math.PI*clamp(effect.life/effect.duration,0,1));
+    const alongX=Math.cos(effect.angle),alongY=Math.sin(effect.angle);
+    const acrossX=-alongY,acrossY=alongX;
+    const length=92+effect.strength*30;
+    ctx.save();
+    ctx.translate(effect.x,effect.y);
+    ctx.globalAlpha=alpha*.9;
+    ctx.lineCap='round';
+    ctx.strokeStyle='#ffffff';
+    ctx.lineWidth=Math.max(2,7-progress*4);
+    ctx.beginPath();
+    ctx.moveTo(acrossX*-length*.34,acrossY*-length*.34);
+    ctx.lineTo(acrossX*length*.34,acrossY*length*.34);
+    ctx.stroke();
+    ctx.strokeStyle=effect.color;
+    ctx.lineWidth=Math.max(1.5,5-progress*3);
+    for(const offset of [-18,0,18]){
+      const start=-length*(.72+progress*.18);
+      const end=-length*(.14+progress*.08);
+      ctx.globalAlpha=alpha*(offset===0?.72:.42);
+      ctx.beginPath();
+      ctx.moveTo(alongX*start+acrossX*offset,alongY*start+acrossY*offset);
+      ctx.lineTo(alongX*end+acrossX*offset*.35,alongY*end+acrossY*offset*.35);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
 function drawTrails(){window.NEON_RENDER_EFFECTS.launchTrails(ctx,trails);}
-function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of shieldBreakEffects)effect.life-=dt;shieldBreakEffects=shieldBreakEffects.filter(effect=>effect.life>0);for(const image of dashAfterimages)image.life-=dt;dashAfterimages=dashAfterimages.filter(image=>image.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
+function updateParticles(dt){for(const p of particles){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=(p.gravity||0)*dt;p.vx*=Math.exp(-dt*6.5);p.vy*=Math.exp(-dt*6.5);}particles=particles.filter(p=>p.life>0);for(const ring of impactRings)ring.life-=dt;impactRings=impactRings.filter(ring=>ring.life>0);for(const effect of finisherImpacts)effect.life-=dt;finisherImpacts=finisherImpacts.filter(effect=>effect.life>0);for(const mark of blastMarks)mark.life-=dt;blastMarks=blastMarks.filter(mark=>mark.life>0);for(const effect of shieldBreakEffects)effect.life-=dt;shieldBreakEffects=shieldBreakEffects.filter(effect=>effect.life>0);for(const image of dashAfterimages)image.life-=dt;dashAfterimages=dashAfterimages.filter(image=>image.life>0);for(const effect of koCinematics)effect.life-=dt;koCinematics=koCinematics.filter(effect=>effect.life>0);for(const trail of trails)trail.life-=dt;trails=trails.filter(trail=>trail.life>0);trailClock-=dt;if((state==='playing'||state==='waiting')&&trailClock<=0){trailClock=.045;for(const p of players){if(p.eliminated||p.respawn>0)continue;const action=displayedAction(p),speed=Math.hypot(p.vx,p.vy),finisher=(p.criticalFlightFrames||0)>0,launched=(p.tumbling||action==='tumble')&&speed>520;if(launched){const fighter=FIGHTERS.find(item=>item.id===p.characterId)||FIGHTERS[0];trails.push({x:p.x,y:p.y,vx:p.vx,vy:p.vy,launch:true,finisher,color:fighter.palettes[p.palette%fighter.palettes.length],life:finisher?.3:.24});}}}}
 
 function loop(now){
   requestAnimationFrame(loop);
@@ -3699,7 +3816,7 @@ if (visualTestMode) {
     visualFixtureActive = true;
     state = 'fixture'; rules = built.rules;
     stage = built.stage; platforms = built.platforms;
-    entities = []; items = []; particles = []; trails = []; impactRings = []; blastMarks = []; shieldBreakEffects = [];
+    entities = []; items = []; particles = []; trails = []; impactRings = []; finisherImpacts = []; blastMarks = []; shieldBreakEffects = [];
     camera = built.camera;
     menu.classList.add('hidden'); waitingRoom.classList.add('hidden'); result.classList.add('hidden');
     countdown.classList.add('hidden'); trainingPanel.classList.add('hidden'); game.classList.remove('hidden');

@@ -982,7 +982,11 @@ function hitPlayer(world, attacker, target, move, direction) {
   // DI, air-dodge or reset neutral instead of being pinned in place forever.
   const groundedFlinch = requestedGroundedFlinch && target.comboCount <= 2;
   let launchX = direction * (move.fixedKx ?? move.kx) * scale * rage * launchGrowth * crouchKnockbackMultiplier;
-  let launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) * scale : -Math.abs(move.fixedKy ?? move.ky) * Math.min(scale, 2.2)) * rage * launchGrowth * crouchKnockbackMultiplier;
+  // Preserve each move's authored launch angle as percent rises. Capping only
+  // vertical growth flattened high-percent hits into the floor, making strong
+  // attacks look fast without carrying the victim a Smash-like distance.
+  let launchY = (move.meteor ? Math.abs(move.fixedKy ?? move.ky) : -Math.abs(move.fixedKy ?? move.ky))
+    * scale * rage * launchGrowth * crouchKnockbackMultiplier;
   if (requestedGroundedFlinch && !groundedFlinch) {
     const escapePush = 150 + Math.min(3, target.comboCount - 3) * 22;
     launchX = direction * Math.max(Math.abs(launchX) * 1.35, escapePush);
@@ -1005,11 +1009,19 @@ function hitPlayer(world, attacker, target, move, direction) {
   const launchSpeed = armored ? 0 : Math.hypot(target.vx, target.vy);
   const critical = !armored && (launchSpeed >= 720 || (target.damage >= 110 && launchSpeed >= 560));
   const finisherFlight = !armored && !groundedFlinch && target.damage >= 110 && launchSpeed >= 620;
-  target.launchDecay = clamp(5.2 + launchSpeed / 330, 6.2, 9.2);
+  // High-speed launches retain momentum long enough for offstage recovery
+  // play, while low-power hits still settle quickly.
+  target.launchDecay = clamp(4.7 + launchSpeed / 390, 5.5, 7.8);
   target.criticalFlightFrames = finisherFlight ? clamp(Math.round(10 + (launchSpeed - 620) / 55), 10, 22) : 0;
   if (critical) {
     target.hitstop = Math.max(target.hitstop, Math.min(14, move.hitstop + 4));
     attacker.hitstop = Math.max(attacker.hitstop, Math.min(10, move.hitstop + 1));
+  }
+  if (finisherFlight) {
+    // A finishing blow needs a readable impact beat before the straight launch.
+    // This is server-authoritative so every client sees the same pause.
+    target.hitstop = Math.max(target.hitstop, Math.min(16, move.hitstop + 6));
+    attacker.hitstop = Math.max(attacker.hitstop, Math.min(12, move.hitstop + 3));
   }
   const baseHitstun = move.hitstun != null
     ? clamp(Math.round(move.hitstun), 4, 60)
@@ -1110,7 +1122,12 @@ function resolveMoveHits(world, player, action = player.action) {
     const touchedHurtbox = playerHurtboxes(target).find(circle => hitboxTouchesCircle(hitbox, circle));
     const overlaps = !!touchedHurtbox;
     const attackFace = move.backward ? -player.face : player.face;
-    const facing = move.radial || move.vertical || Math.sign(target.x - player.x || attackFace) === attackFace;
+    // Vertical attacks are governed by their actual box, not by the generic
+    // left/right facing gate. In particular, a down-air box straddles the
+    // fighter's center line; requiring "in front" made its rear half visible
+    // in hitbox debug while silently unable to connect.
+    const facing = move.radial || move.vertical || move.downward
+      || Math.sign(target.x - player.x || attackFace) === attackFace;
     const sweet = overlaps && sweetspotHit(player, target, move, hitbox);
     const contact = touchedHurtbox ? hitContactPoint(hitbox, touchedHurtbox) : null;
     const contactData = contact ? {
@@ -1132,6 +1149,7 @@ function resolvePendingMoveHits(world) {
 }
 
 function attackHitbox(player, move) {
+  const actionName = move.name || player.action?.name || player.actionName;
   if (move.low) {
     const centerY = player.y + player.height * .28;
     if (move.radial) return { type: 'box', x: player.x, y: centerY, w: move.reachX * 1.44, h: move.reachY * .64 };
@@ -1152,12 +1170,26 @@ function attackHitbox(player, move) {
   }
   if (move.radial) return { type: 'circle', x: player.x, y: player.y, radius: move.reachX * .76 };
   if (move.vertical) {
-    const near = player.height * .12, far = Math.max(near + 12, move.reachY);
-    return { type: 'box', x: player.x, y: player.y - (near + far) / 2, w: move.reachX * .78, h: far - near };
+    const directionalUpAttack = actionName === 'groundUp' || actionName === 'airUp';
+    const airborne = actionName === 'airUp';
+    const near = player.height * (airborne ? .16 : .1);
+    // The old authored reach extended far beyond the stick fighter's hand/foot.
+    // Cap directional upper attacks to a physical limb-length envelope so the
+    // visible overhead contact and the real box end at the same height.
+    const physicalFar = directionalUpAttack ? player.height * .9 : move.reachY;
+    const far = Math.max(near + 12, Math.min(move.reachY, physicalFar));
+    const widthScale = directionalUpAttack ? (airborne ? .54 : .58) : .78;
+    const offsetX = directionalUpAttack ? player.face * (airborne ? 8 : 6) : 0;
+    return { type: 'box', x: player.x + offsetX, y: player.y - (near + far) / 2, w: move.reachX * widthScale, h: far - near };
   }
   if (move.downward) {
-    const near = player.height * .12, far = Math.max(near + 12, move.reachY);
-    return { type: 'box', x: player.x, y: player.y + (near + far) / 2, w: move.reachX * .78, h: far - near };
+    const downwardAerial = actionName === 'airDown';
+    const near = player.height * (downwardAerial ? .16 : .12);
+    const physicalFar = downwardAerial ? player.height * 1.05 : move.reachY;
+    const far = Math.max(near + 12, Math.min(move.reachY, physicalFar));
+    const widthScale = downwardAerial ? .52 : .78;
+    const offsetX = downwardAerial ? player.face * 4 : 0;
+    return { type: 'box', x: player.x + offsetX, y: player.y + (near + far) / 2, w: move.reachX * widthScale, h: far - near };
   }
   const direction = move.backward ? -player.face : player.face;
   const near = player.width * .16, far = Math.max(near + 12, move.reachX);
@@ -2716,7 +2748,10 @@ function decideCpuInput(world, player, difficulty) {
     const interceptToward = Math.sign(predictedX - player.x || toward);
     if (predictedGap <= 112) {
       const vertical = dy < -34 ? -1 : 0;
-      chosen = cpuInput(world, vertical ? 0 : interceptToward, vertical, BUTTONS.ATTACK);
+      // Once BLAZE is already in jab range, stop feeding a horizontal input
+      // that converts every close punish into another side tilt.
+      const horizontal = !vertical && predictedGap > 58 ? interceptToward : 0;
+      chosen = cpuInput(world, horizontal, vertical, BUTTONS.ATTACK);
     } else if (predictedGap < 270) {
       chosen = cpuInput(world, unsafeForwardStep ? 0 : interceptToward, 0);
     }

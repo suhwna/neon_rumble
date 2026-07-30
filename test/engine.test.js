@@ -959,15 +959,26 @@ test('high-percent finishers retain enough launch momentum to travel a visibly g
         maxAngleDrift = Math.max(maxAngleDrift, Math.abs(Math.atan2(Math.sin(angle - launchAngle), Math.cos(angle - launchAngle))));
       }
     }
-    return { distance: farthestX - startX, launchSpeed: hit?.launchSpeed || 0, finisherFlight: hit?.finisherFlight, finisherFrames, maxAngleDrift };
+    return {
+      distance: farthestX - startX,
+      launchSpeed: hit?.launchSpeed || 0,
+      launchAngle,
+      finisherFlight: hit?.finisherFlight,
+      finisherFrames,
+      maxAngleDrift
+    };
   };
   const fresh = launchAt(0), high = launchAt(180);
   assert.ok(high.launchSpeed > 900, `expected a fast high-percent launch, got ${high.launchSpeed}`);
   assert.equal(high.finisherFlight, true);
   assert.ok(high.finisherFrames >= 8, `expected a sustained straight finisher burst, got ${high.finisherFrames} frames`);
   assert.ok(high.maxAngleDrift < 0.002, `expected the opening launch angle to stay straight, drifted ${high.maxAngleDrift}`);
-  assert.ok(high.distance > 300, `expected travel above 300px, got ${high.distance}`);
+  assert.ok(high.distance > 400, `expected travel above 400px, got ${high.distance}`);
   assert.ok(high.distance > fresh.distance * 1.65, `expected clear percent scaling: ${high.distance} vs ${fresh.distance}`);
+  assert.ok(
+    Math.abs(high.launchAngle - fresh.launchAngle) < .08,
+    `expected percent growth to preserve the move angle: ${fresh.launchAngle} vs ${high.launchAngle}`
+  );
 });
 
 test('expanded blast zones leave room to recover before a real knockout', () => {
@@ -2442,6 +2453,62 @@ test('ground roll and air dodge keep dodge state instead of becoming hitstun', (
   assert.equal(air.players[0].actionName, 'airDodge');
   assert.equal(air.players[0].stun, 0);
   assert.equal(air.players[0].airDodgeAvailable, false);
+});
+
+test('vertical normals align narrow hitboxes with the visible attacking limbs', () => {
+  for (const fighter of FIGHTERS) {
+    const world = createWorld({ rules: { mode: 'training', stocks: 3 }, roster: [
+      { slot: 0, clientId: 'vertical-audit', characterId: fighter.id },
+      { slot: 1, clientId: 'dummy', characterId: 'volt' }
+    ] });
+    world.phase = 'active';
+    const player = world.players[0]; player.face = 1;
+    for (const name of ['groundUp', 'airUp', 'airDown']) {
+      const move = { ...fighter.moves[name], name };
+      player.action = { name, move, frame: move.startup, startup: move.startup, hit: [] };
+      player.actionName = name;
+      const rendered = publicSnapshot(world).players[0];
+      const box = rendered.actionHitbox;
+      assert.equal(box.type, 'box', `${fighter.id}.${name} shape`);
+      assert.ok(box.w <= move.reachX * .59, `${fighter.id}.${name} should not hit far beside the limb`);
+      if (name !== 'airDown') assert.ok(box.y - box.h / 2 >= player.y - player.height * .91, `${fighter.id}.${name} vertical reach stays physical`);
+      assert.equal(rendered.strikePoints.length, 1, `${fighter.id}.${name} primary limb`);
+      assert.ok(Math.abs(rendered.strikePoints[0].x - box.x) < .01, `${fighter.id}.${name} strike x`);
+      if (name === 'airDown') {
+        assert.ok(box.y > player.y && rendered.strikePoints[0].y > player.y, `${fighter.id}.${name} below body`);
+        assert.ok(box.y + box.h / 2 <= player.y + player.height * 1.06, `${fighter.id}.${name} downward reach stays at the foot`);
+      } else {
+        assert.ok(box.y < player.y && rendered.strikePoints[0].y < player.y, `${fighter.id}.${name} above body`);
+      }
+    }
+  }
+});
+
+test('down aerial connects across its entire displayed hitbox instead of rejecting the rear half', () => {
+  for (const fighter of FIGHTERS) {
+    const world = createWorld({ rules: { mode: 'training', stocks: 3 }, roster: [
+      { slot: 0, clientId: 'dair-attacker', characterId: fighter.id },
+      { slot: 1, clientId: 'dair-target', characterId: 'volt' }
+    ] });
+    world.phase = 'active';
+    const attacker = world.players[0], target = world.players[1];
+    attacker.x = 620; attacker.y = 245; attacker.face = 1;
+    target.x = attacker.x - 7; target.y = 322;
+    for (const player of [attacker, target]) {
+      player.grounded = false; player.platformId = null; player.invincible = 0;
+      player.vx = 0; player.vy = 0;
+    }
+    const move = { ...fighter.moves.airDown, name: 'airDown' };
+    attacker.action = {
+      name: 'airDown', move, frame: move.startup, startup: move.startup,
+      hit: [], activated: false, contactKind: 'whiff'
+    };
+    attacker.actionName = 'airDown';
+    const before = publicSnapshot(world).players[0].actionHitbox;
+    assert.ok(target.x >= before.x - before.w / 2 && target.x <= before.x + before.w / 2, `${fighter.id} target x inside debug box`);
+    stepWorld(world, { 0: frame(1), 1: frame(1) });
+    assert.ok(world.events.some(event => event.type === 'hit' && event.attacker === attacker.i && event.player === target.i), `${fighter.id} rear-half down air hit`);
+  }
 });
 
 test('roll invincibility avoids overlapping projectiles but vulnerable recovery can be hit', () => {
